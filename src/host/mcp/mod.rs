@@ -760,6 +760,7 @@ impl McpHost {
             last_used_ms: None,
             remote_allowed: false,
             allowed_cidrs: Vec::new(),
+            is_agent: false,
         };
         if self.edit_clients(|clients| clients.push(client)) {
             self.fresh_token = Some(FreshToken {

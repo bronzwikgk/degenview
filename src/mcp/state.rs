@@ -12,10 +12,10 @@ use crate::mcp::transport::limits::{RateLimiter, RateLimits};
 use crate::model::DataSource;
 use crate::model::InstrumentId;
 use crate::model::mcp::{McpClient, Peer, Permission, PermissionSet};
-use std::collections::HashSet;
 use crate::service::watchlist_quotes::{WatchlistQuoteBook, WatchlistQuoteCoordinator};
 use crate::service::{ProviderError, SearchResult};
 use crate::store::scripts::ScriptStore;
+use std::collections::HashSet;
 #[cfg(test)]
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -230,7 +230,10 @@ impl McpShared {
 
     /// Record that a change has been made, starting the autosave debounce timer.
     pub fn record_change(&self) {
-        self.last_save_time.store(std::time::Instant::now().elapsed().as_secs(), Ordering::Relaxed);
+        self.last_save_time.store(
+            crate::clock::now_ms().div_euclid(1_000) as u64,
+            Ordering::Relaxed,
+        );
     }
 
     /// Check if autosave should trigger based on the debounce period.
@@ -240,10 +243,7 @@ impl McpShared {
             return false;
         }
         let last_change = self.last_save_time.load(Ordering::Relaxed);
-        let now = std::time::Instant::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let now = crate::clock::now_ms().div_euclid(1_000) as u64;
         if now - last_change > 2 {
             // Trigger autosave - in a real implementation, this would persist the state
             // For now, just record that we ran autosave and reset the timer

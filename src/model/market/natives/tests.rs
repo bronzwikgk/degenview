@@ -11,7 +11,7 @@ const TABLE: [&str; 24] = [
     "3D", "5D", "1W", "2W", "1M", "2M", "3M", "6M", "1Y",
 ];
 
-const CANDLE_SOURCES: [DataSource; 9] = [
+const CANDLE_SOURCES: [DataSource; 10] = [
     DataSource::Binance,
     DataSource::Coinbase,
     DataSource::Okx,
@@ -20,6 +20,7 @@ const CANDLE_SOURCES: [DataSource; 9] = [
     DataSource::Gate,
     DataSource::Mexc,
     DataSource::Alpaca,
+    DataSource::Yahoo,
     DataSource::DexScreener,
 ];
 

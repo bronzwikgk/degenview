@@ -301,6 +301,7 @@ fn instrument_from(token: &str) -> Result<WatchlistInstrument, String> {
             Ok(item(source, &symbol, &symbol, &symbol))
         }
         DataSource::Alpaca => stock(&rest),
+        DataSource::Yahoo => nse_stock(&rest),
         DataSource::CoinGecko => {
             let id = rest.to_lowercase();
             let name = id
@@ -372,6 +373,16 @@ fn stock(symbol: &str) -> Result<WatchlistInstrument, String> {
         return Err("Not a US stock ticker".to_owned());
     }
     Ok(item(DataSource::Alpaca, &upper, &upper, &upper))
+}
+
+fn nse_stock(symbol: &str) -> Result<WatchlistInstrument, String> {
+    let upper = symbol.trim().to_uppercase();
+    let ticker = upper.strip_suffix(".NS").unwrap_or(&upper);
+    if !(1..=20).contains(&ticker.len()) || !ticker.chars().all(is_upper_alphanumeric) {
+        return Err("Not an NSE ticker; use a symbol such as RELIANCE.NS".to_owned());
+    }
+    let symbol = format!("{ticker}.NS");
+    Ok(item(DataSource::Yahoo, &symbol, ticker, &symbol))
 }
 
 fn item(source: DataSource, symbol: &str, name: &str, label: &str) -> WatchlistInstrument {

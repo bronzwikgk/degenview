@@ -86,6 +86,13 @@ impl McpState {
         &self.questions
     }
 
+    /// Advances the MCP settings autosave debounce on the app thread.
+    pub(super) fn maybe_autosave(&self) {
+        if let Ok(host) = self.host.lock() {
+            host.shared().maybe_autosave();
+        }
+    }
+
     /// Stops the server and writes the activity log's last rows (they are otherwise written about
     /// once a second, so a quit would lose the final moments).
     pub(super) fn shutdown(&self) {

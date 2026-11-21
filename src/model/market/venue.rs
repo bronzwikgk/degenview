@@ -76,6 +76,7 @@ mod tests {
             ("POLYMARKET", DataSource::Polymarket),
             ("KALSHI", DataSource::Kalshi),
             ("CMC", DataSource::CoinMarketCap),
+            ("YAHOO", DataSource::Yahoo),
         ] {
             assert_eq!(source(&format!("{slug}:X")), Some(expected), "{slug}");
         }

@@ -63,6 +63,7 @@ pub fn icon_base_symbol(item: &WatchlistInstrument) -> String {
         }
         DataSource::Kraken => symbol.split('/').next().unwrap_or(symbol).to_uppercase(),
         DataSource::Gate => symbol.split('_').next().unwrap_or(symbol).to_uppercase(),
+        DataSource::Yahoo => symbol.trim_end_matches(".NS").to_uppercase(),
         DataSource::CoinGecko | DataSource::DexScreener => item
             .label
             .split('/')

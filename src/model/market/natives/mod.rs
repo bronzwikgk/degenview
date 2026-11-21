@@ -162,6 +162,9 @@ const ALPACA: [Timeframe; 8] = [
     Timeframe::MONTH_1,
 ];
 
+/// Yahoo Finance's documented chart intervals that align with DegenView's calendar buckets.
+const YAHOO: [Timeframe; 3] = [Timeframe::DAY_1, Timeframe::WEEK_1, Timeframe::MONTH_1];
+
 /// GeckoTerminal's OHLCV aggregates (it indexes DEXScreener's pools): minute 1, 5 and 15, hour 1,
 /// 4 and 12, and the day.
 const GECKOTERMINAL: [Timeframe; 7] = [
@@ -192,6 +195,7 @@ impl DataSource {
             Self::Gate => &GATE,
             Self::Mexc => &MEXC,
             Self::Alpaca => &ALPACA,
+            Self::Yahoo => &YAHOO,
             Self::DexScreener => &GECKOTERMINAL,
             Self::CoinGecko | Self::Polymarket | Self::Kalshi | Self::CoinMarketCap => &[],
         }
@@ -215,6 +219,7 @@ impl DataSource {
             | Self::Gate
             | Self::Mexc
             | Self::Alpaca
+            | Self::Yahoo
             | Self::DexScreener => self.plan(timeframe).is_some(),
             Self::CoinGecko => samples::chart_days(timeframe, 1).is_some(),
             Self::Polymarket | Self::Kalshi | Self::CoinMarketCap => true,
@@ -235,7 +240,8 @@ impl DataSource {
             | Self::Bybit
             | Self::Gate
             | Self::Mexc
-            | Self::Alpaca => true,
+            | Self::Alpaca
+            | Self::Yahoo => true,
             Self::DexScreener => self.plan(timeframe).is_some_and(|plan| {
                 let page_days = plan.base().nominal_ms() * GECKOTERMINAL_PAGE as i64 / 86_400_000;
                 page_days < GECKOTERMINAL_HISTORY_DAYS

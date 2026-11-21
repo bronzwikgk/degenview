@@ -1,6 +1,6 @@
 //! What one chart is made of: its look, canvas, viewport, price scale, layout, templates, snapshots and the bars it draws.
 
-pub(in crate::model) mod appearance;
+pub mod appearance;
 pub mod canvas;
 pub mod clipboard;
 pub mod context;

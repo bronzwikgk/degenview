@@ -113,6 +113,7 @@ impl InstrumentId {
             | DataSource::Kraken
             | DataSource::Gate => Self::new(source, symbol).api_symbol(),
             DataSource::Alpaca => symbol.to_uppercase(),
+            DataSource::Yahoo => symbol.to_uppercase(),
             DataSource::CoinGecko => symbol.to_lowercase(),
             _ => symbol.to_owned(),
         }

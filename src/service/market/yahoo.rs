@@ -1,457 +1,270 @@
-//! Yahoo Finance REST API service for NSE Indian stocks.
-//! 
-//! Fetches historical candle data from Yahoo Finance API and persists it
-//! to local chart storage. Uses REST API (no live websocket connection needed).
-//! 
-//! Symbol format: "RELIANCE.NS", "TCS.NS", "INFY.NS", etc.
-//! The ".NS" suffix identifies National Stock Exchange of India listings.
+//! Yahoo Finance REST market-data provider.
+//!
+//! Yahoo has no candle stream in DegenView: chart updates are obtained through
+//! normal REST refreshes. Yahoo chart timestamps are seconds; DegenView uses
+//! milliseconds, so conversion happens at this boundary.
 
-use crate::model::market::DataSource;
-use crate::model::chart::Kline;
-use crate::model::chart::layout::Timeframe;
-use crate::service::market::split_binance_pair;
-use crate::service::market::split_mexc_pair;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::time::Duration;
+use super::candles::plan;
+use crate::model::market::bucket::{bucket_start_ms, next_bucket_start_ms};
+use crate::model::{DataSource, Kline, Timeframe};
+use crate::service::{rank_results, MarketSource, ProviderError, SearchResult};
+use crate::store::SharedStore;
+use serde_json::Value;
+use std::sync::OnceLock;
 
-/// Yahoo Finance API endpoints
-pub const YAHOO_FINANCE_BASE_URL: &str = "https://query1.finance.yahoo.com/v8/finance/chart";
-pub const YAHOO_FINANCE_SPARK_URL: &str = "https://query1.finance.yahoo.com/v8/finance/spark/chart";
+const CHART_URL: &str = "https://query1.finance.yahoo.com/v8/finance/chart";
+const SEARCH_URL: &str = "https://query1.finance.yahoo.com/v1/finance/search";
+const MAX_BARS: usize = 10_000;
 
-/// Query parameters for Yahoo Finance chart API
-#[derive(Debug, Clone)]
-pub struct YahooChartQuery {
-    pub symbol: String,
-    pub interval: YahooInterval,
-    pubrange: YahooRange,
+pub struct Yahoo;
+pub const YAHOO: Yahoo = Yahoo;
+
+static STORE: OnceLock<SharedStore> = OnceLock::new();
+
+/// Installs the app's durable store before Yahoo charts start fetching.
+pub fn install_store(store: SharedStore) {
+    let _ = STORE.set(store);
 }
 
-/// Interval options for Yahoo Finance
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum YahooInterval {
-    /// 1 minute data
-    Minute1m,
-    /// 5 minute data
-    Minute5m,
-    /// 15 minute data
-    Minute15m,
-    /// 30 minute data
-    Minute30m,
-    /// 1 hour data
-    Hour1h,
-    /// 1 day data (default for historical)
-    Day1d,
-    /// 1 week data
-    Week1w,
-    /// 1 month data
-    Month1m,
-}
-
-/// Range options for Yahoo Finance
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum YahooRange {
-    /// 1 day of data
-    Range1d,
-    /// 5 days of data
-    Range5d,
-    /// 1 month of data
-    Range1mo,
-    /// 3 months of data
-    Range3mo,
-    /// 6 months of data
-    Range6mo,
-    /// 1 year of data
-    Range1y,
-    /// 2 years of data
-    Range2y,
-    /// 5 years of data
-    Range5y,
-    /// Max available data
-    Max,
-}
-
-impl Default for YahooInterval {
-    fn default() -> Self {
-        YahooInterval::Day1d
-    }
-}
-
-impl Default for YahooRange {
-    fn default() -> Self {
-        YahooRange::Range5y
-    }
-}
-
-/// Yahoo Finance chart response structure
-#[derive(Debug, Deserialize)]
-pub struct YahooChartResponse {
-    pub chart: YahooChartData,
-    pub error: Option<YahooError>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct YahooChartData {
-    pub result: Option<Vec<YahooChartResult>>,
-    pub underlying: Option<YahooUnderlying>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct YahooChartResult {
-    pub timestamp: Vec<i64>,
-    pub open: Option<Vec<f64>>,
-    pub high: Option<Vec<f64>>,
-    pub low: Option<Vec<f64>>,
-    pub close: Option<Vec<f64>>,
-    pub volume: Option<Vec<i64>>,
-    pub meta: Option<YahooMeta>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct YahooMeta {
-    pub your_query: Option<String>,
-    pub symbol: Option<String>,
-    pub exchange: Option<String>,
-    pub your_price_source: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct YahooError {
-    pub code: Option<String>,
-    pub description: Option<String>,
-}
-
-/// Fetches historical candle data from Yahoo Finance for a single NSE symbol.
-/// 
-/// # Arguments
-/// - `symbol`: NSE symbol with .NS suffix (e.g., "RELIANCE.NS")
-/// - `interval`: Time interval for candles (default: 1 day)
-/// - `range`: Lookback range (default: 5 years)
-/// 
-/// # Returns
-/// - `Ok(Vec<Kline>)`: Parsed candle data
-/// - `Err(String)`: Error description if fetch fails
-pub async fn fetch_nse_candles(
-    symbol: &str,
-    interval: YahooInterval,
-    range: YahooRange,
-) -> Result<Vec<Kline>, String> {
-    // Build the URL
-    let url = format!(
-        "{}/chart?interval={:?}&range={:?}&symbol={}",
-        YAHOO_FINANCE_BASE_URL,
-        interval as i32,
-        range as i32,
-        symbol,
-    );
-
-    // Make the REST API call
-    let client = reqwest::Client::new();
-    let response = client
-        .get(&url)
-        .timeout(Duration::from_secs(30))
-        .send()
-        .await
-        .map_err(|e| format!("Yahoo API request failed: {}", e))?;
-
-    let status = response.status();
-    if !status.is_success() {
-        return Err(format!(
-            "Yahoo API returned status {}: {}",
-            status.as_u16(),
-            response.text().await.unwrap_or_default()
-        ));
+impl MarketSource for Yahoo {
+    fn fetch_klines(
+        &self,
+        symbol: &str,
+        timeframe: Timeframe,
+        limit: u32,
+    ) -> Result<Vec<Kline>, ProviderError> {
+        let plan = plan(DataSource::Yahoo, timeframe)?;
+        let requested = plan.base_count(limit as usize).min(MAX_BARS);
+        let since = crate::clock::now_ms() - requested as i64 * plan.base().nominal_ms() * 3;
+        let local = load_local(symbol, plan.base(), requested);
+        // A newly opened daily Yahoo market is backfilled once from the provider's first
+        // available candle. Subsequent chart loads only refresh the recent request window.
+        let initial_backfill = local.is_empty() && plan.base() == Timeframe::DAY_1;
+        let start = initial_backfill.then_some(0).or(Some(since));
+        let bars = match fetch_bars(symbol, plan.base(), requested, start, None) {
+            Ok(bars) => {
+                save_local(symbol, plan.base(), &bars);
+                bars
+            }
+            Err(error) if !local.is_empty() => local,
+            Err(error) => return Err(error),
+        };
+        Ok(plan.shape_since(bars, requested, since, limit as usize))
     }
 
-    let body = response
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read response: {}", e))?;
-
-    // Parse the JSON response
-    let parsed: YahooChartResponse = serde_json::from_str(&body)
-        .map_err(|e| format!("Failed to parse Yahoo response: {}", e))?;
-
-    // Check for errors in the response
-    if let Some(error) = parsed.chart.error {
-        return Err(format!(
-            "Yahoo API error: {} (code: {:?})",
-            error.description.unwrap_or_default(),
-            error.code
-        ));
+    fn fetch_klines_range(
+        &self,
+        symbol: &str,
+        timeframe: Timeframe,
+        start_ms: i64,
+        end_ms: i64,
+        limit: usize,
+    ) -> Result<Vec<Kline>, ProviderError> {
+        let plan = plan(DataSource::Yahoo, timeframe)?;
+        let requested = plan.base_count(limit).min(MAX_BARS);
+        let bars = fetch_bars(symbol, plan.base(), requested, Some(start_ms), Some(end_ms))?;
+        save_local(symbol, plan.base(), &bars);
+        Ok(plan.shape_since(bars, requested, start_ms, limit))
     }
 
-    // Extract chart results
-    let result = parsed
-        .chart
-        .result
-        .ok_or_else(|| "No chart data found in Yahoo response".to_string())?;
-
-    if result.is_empty() {
-        return Err("No chart result data".to_string());
-    }
-
-    let chart_result = &result[0];
-
-    // Convert timestamps and prices to Kline objects
-    let timestamps = chart_result
-        .timestamp
-        .clone()
-        .into_iter()
-        .map(|ts| {
-            // Convert Unix milliseconds to seconds for Kline
-            let seconds = ts / 1000;
-            seconds
-        })
-        .collect::<Vec<i64>>();
-
-    let opens = chart_result.open.un_or_default();
-    let highs = chart_result.high.un_or_default();
-    let lows = chart_result.low.un_or_default();
-    let closes = chart_result.close.un_or_default();
-    let volumes = chart_result.volume.un_or_default();
-
-    // Ensure all vectors are the same length
-    let len = timestamps.len().min(opens.len()).min(highs.len()).min(lows.len()).min(closes.len()).min(volumes.len());
-
-    if len == 0 {
-        return Err("No valid candle data found".to_string());
-    }
-
-    let mut candles = Vec::with_capacity(len);
-
-    for i in 0..len {
-        // Yahoo Finance uses milliseconds since epoch
-        let open_time = timestamps[i];
-        let open_price = opens.get(i).copied().unwrap_or(0.0);
-        let high_price = highs.get(i).copied().unwrap_or(0.0);
-        let low_price = lows.get(i).copied().unwrap_or(0.0);
-        let close_price = closes.get(i).copied().unwrap_or(0.0);
-        let volume = volumes.get(i).copied().unwrap_or(0) as u64;
-
-        candles.push(Kline {
-            open_time,
-            open: open_price,
-            high: high_price,
-            low: low_price,
-            close: close_price,
-            volume,
-        });
-    }
-
-    // Sort by open_time (oldest first)
-    candles.sort_by_key(|k| k.open_time);
-
-    Ok(candles)
-}
-
-/// Converts a NSE symbol (e.g., "RELIANCE.NS") to Yahoo format
-/// Yahoo typically uses the symbol as-is with .NS suffix
-pub fn normalize_nse_symbol(symbol: &str) -> String {
-    let symbol = symbol.trim();
-    // Ensure .NS suffix is present
-    if !symbol.to_uppercase().ends_with(".NS") {
-        format!("{}.NS", symbol)
-    } else {
-        symbol.to_owned()
-    }
-}
-
-/// Fetches and returns all available NSE stock symbols from Yahoo Finance watchlist
-/// This is useful for discovering which NSE stocks are available
-pub async fn fetch_nse_universe() -> Result<Vec<String>, String> {
-    // Yahoo Finance doesn't provide a direct "list all NSE stocks" endpoint,
-    // but we can use known NSE symbols or search functionality
-    // For now, return common NSE symbols
-    Ok(vec![
-        "RELIANCE".to_owned(),
-        "TCS".to_owned(),
-        "INFY".to_owned(),
-        "HDFCBANK".to_owned(),
-        "ICICIBANK".to_owned(),
-        "SBIN".to_owned(),
-        "BHARTIARTL".to_owned(),
-        "ITC".to_owned(),
-        "KOTAKBANK".to_owned(),
-        "ASIANPAINT".to_owned(),
-        "MARUTI".to_owned(),
-        "HCLTECH".to_owned(),
-        "TATASTEEL".to_owned(),
-        "TATAMOTORS".to_owned(),
-        "RELIANCE".to_owned(),
-        "HDFC".to_owned(),
-        "SUNPHARMA".to_owned(),
-        "TECHM".to_owned(),
-        "BajajFinance".to_owned(),
-        "NTPC".to_owned(),
-    ]
-    .into_iter()
-    .map(normalize_nse_symbol)
-    .collect)
-}
-
-/// Saves fetched candle data to the chart workspace's local storage.
-/// 
-/// # Arguments
-/// - `workspace_id`: The workspace/chart identifier
-/// - `symbol`: The NSE symbol (e.g., "RELIANCE.NS")
-/// - `candles`: The Kline data to persist
-/// - `timeframe`: The timeframe of the candles
-pub async fn save_candles_to_workspace(
-    workspace: &crate::workspace::ChartWorkspace,
-    symbol: &str,
-    candles: Vec<Kline>,
-    timeframe: Timeframe,
-) -> Result<(), String> {
-    // Create a chart config with the Yahoo data source
-    let chart_config = crate::model::chart::layout::ChartConfig {
-        id: workspace.focused.un_or(0),
-        symbol: symbol.to_owned(),
-        source: DataSource::Yahoo,
-        scale_mode: crate::model::chart::price_scale::PriceScaleMode::default(),
-        appearance: crate::model::chart::ChartAppearance::default(),
-        card: None,
-        overlays: Default::default(),
-    };
-
-    // Add the chart to the workspace (this will persist the config)
-    // Note: This uses the workspace's existing chart addition path
-    let instrument = crate::model::InstrumentId::new(DataSource::Yahoo, symbol);
-    
-    // The workspace will handle persisting the chart config
-    // This integrates with the existing layout autosave system
-    Ok(())
-}
-
-/// Full daily update pipeline for NSE stocks
-/// 
-/// # How it works:
-/// 1. Fetches candles for specified NSE symbols from Yahoo Finance REST API
-/// 2. Persists each symbol's data to the chart workspace
-/// 3. Integrates with existing autosave system for session persistence
-/// 
-/// # Usage
-/// ```rust
-/// use crate::service::market::yahoo::{fetch_nse_universe, save_candles_to_workspace};
-/// use crate::model::chart::layout::Timeframe;
-/// 
-/// async fn daily_nse_update(workspace: &ChartWorkspace) -> Result<(), String> {
-///     let symbols = fetch_nse_universe().await?;
-///     let timeframe = Timeframe::DAY;
-///     
-///     for symbol in &symbols {
-///         let candles = fetch_nse_candles(symbol, YahooInterval::Day1d, YahooRange::Range1y).await?;
-///         save_candles_to_workspace(workspace, symbol, candles, timeframe).await?;
-///     }
-///     Ok(())
-/// }
-/// ```
-pub struct YahooNseUpdater {
-    /// Symbols to update daily (default: common NSE stocks)
-    symbols: Vec<String>,
-    /// Timeframe for candles
-    timeframe: Timeframe,
-    /// Lookback range in years
-    range_years: u32,
-}
-
-impl YahooNseUpdater {
-    /// Creates a new Yahoo NSE updater with default configuration
-    pub fn default() -> Self {
-        Self {
-            symbols: fetch_nse_universe().unwrap_or_default(),
-            timeframe: Timeframe::DAY,
-            range_years: 1,
+    fn search_tickers(&self, query: &str) -> Result<Vec<SearchResult>, ProviderError> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Ok(Vec::new());
         }
-    }
-
-    /// Sets the symbols to update (overrides default list)
-    pub fn with_symbols(mut self, symbols: Vec<String>) -> Self {
-        self.symbols = symbols;
-        self
-    }
-
-    /// Sets the timeframe for candles
-    pub fn with_timeframe(mut self, timeframe: Timeframe) -> Self {
-        self.timeframe = timeframe;
-        self
-    }
-
-    /// Sets the lookback range in years
-    pub fn with_range_years(mut self, years: u32) -> Self {
-        self.range_years = years;
-        self
-    }
-
-    /// Runs the daily update: fetches candles for all configured symbols
-    /// and persists them to the workspace.
-    /// 
-    /// This integrates with the existing `maybe_autosave()` system so the
-    /// updates are persisted across sessions.
-    pub async fn update_daily(&self, workspace: &crate::workspace::ChartWorkspace) -> Result<(), String> {
-        let mut updated = 0;
-
-        for symbol in &self.symbols {
-            // Fetch candles from Yahoo Finance REST API
-            let candles = fetch_nse_candles(
-                symbol,
-                YahooInterval::Day1d,
-                YahooRange::Range1y,  // Lookback period
-            )
-            .await
-            .map_err(|e| format!("Failed to fetch {}: {}", symbol, e))?;
-
-            // Save to workspace local storage
-            if !candles.is_empty() {
-                save_candles_to_workspace(workspace, symbol, candles, self.timeframe.clone())
-                    .await
-                    .map_err(|e| format!("Failed to save {}: {}", symbol, e))?;
-                updated += 1;
+        let url = format!(
+            "{SEARCH_URL}?q={}&quotesCount=20&newsCount=0",
+            url_encode(query)
+        );
+        let body = crate::service::net::http::get_text(
+            &url,
+            &[],
+            crate::service::net::http::Retry::Transient,
+        )
+        .map_err(ProviderError::from)?;
+        let payload: Value = serde_json::from_str(&body).map_err(ProviderError::data)?;
+        let mut results = Vec::new();
+        for quote in payload["quotes"].as_array().into_iter().flatten() {
+            let symbol = quote["symbol"].as_str().unwrap_or_default();
+            let name = quote["longname"]
+                .as_str()
+                .or_else(|| quote["shortname"].as_str())
+                .unwrap_or(symbol);
+            let exchange = quote["exchange"].as_str().unwrap_or_default();
+            if symbol.ends_with(".NS") || exchange == "NSI" || exchange == "NSE" {
+                results.push(SearchResult::new(
+                    DataSource::Yahoo,
+                    format!("{symbol}{}{}", crate::service::NAME_SEPARATOR, name),
+                    symbol,
+                ));
             }
         }
-
-        Ok(())
+        Ok(rank_results(results, query))
     }
+}
+
+fn fetch_bars(
+    symbol: &str,
+    timeframe: Timeframe,
+    limit: usize,
+    start_ms: Option<i64>,
+    end_ms: Option<i64>,
+) -> Result<Vec<Kline>, ProviderError> {
+    let interval = yahoo_interval(timeframe)?;
+    let mut url = format!(
+        "{CHART_URL}/{}?interval={interval}&events=history",
+        url_encode(symbol.trim())
+    );
+    if let Some(start_ms) = start_ms {
+        url.push_str(&format!("&period1={}", start_ms.div_euclid(1_000)));
+        if let Some(end_ms) = end_ms {
+            url.push_str(&format!("&period2={}", end_ms.div_euclid(1_000)));
+        }
+    } else {
+        let calendar_days = match timeframe.unit() {
+            crate::model::TimeUnit::Day => limit.saturating_mul(timeframe.count() as usize + 3),
+            crate::model::TimeUnit::Week => limit.saturating_mul(timeframe.count() as usize * 8),
+            crate::model::TimeUnit::Month => limit.saturating_mul(timeframe.count() as usize * 35),
+            _ => return Err(ProviderError::unsupported(DataSource::Yahoo, timeframe)),
+        };
+        url.push_str(&format!(
+            "&period1={}",
+            now_seconds() - calendar_days as i64 * 86_400
+        ));
+    }
+    let body =
+        crate::service::net::http::get_text(&url, &[], crate::service::net::http::Retry::Transient)
+            .map_err(ProviderError::from)?;
+    parse_bars(&body, timeframe)
+}
+
+fn yahoo_interval(timeframe: Timeframe) -> Result<&'static str, ProviderError> {
+    use crate::model::TimeUnit;
+    match (timeframe.count(), timeframe.unit()) {
+        (1, TimeUnit::Day) => Ok("1d"),
+        (1, TimeUnit::Week) => Ok("1wk"),
+        (1, TimeUnit::Month) => Ok("1mo"),
+        _ => Err(ProviderError::unsupported(DataSource::Yahoo, timeframe)),
+    }
+}
+
+fn parse_bars(body: &str, timeframe: Timeframe) -> Result<Vec<Kline>, ProviderError> {
+    let payload: Value = serde_json::from_str(body).map_err(ProviderError::data)?;
+    if let Some(description) = payload["chart"]["error"]["description"].as_str() {
+        return Err(ProviderError::other(format!(
+            "Yahoo Finance: {description}"
+        )));
+    }
+    let result = payload["chart"]["result"]
+        .as_array()
+        .and_then(|results| results.first())
+        .ok_or_else(|| ProviderError::other("Yahoo Finance returned no chart data"))?;
+    let timestamps = result["timestamp"]
+        .as_array()
+        .ok_or_else(|| ProviderError::data("Yahoo Finance response has no timestamps"))?;
+    let quote = result["indicators"]["quote"]
+        .as_array()
+        .and_then(|quotes| quotes.first())
+        .ok_or_else(|| ProviderError::data("Yahoo Finance response has no OHLC data"))?;
+    let empty = Vec::new();
+    let opens = quote["open"].as_array().unwrap_or(&empty);
+    let highs = quote["high"].as_array().unwrap_or(&empty);
+    let lows = quote["low"].as_array().unwrap_or(&empty);
+    let closes = quote["close"].as_array().unwrap_or(&empty);
+    let volumes = quote["volume"].as_array().unwrap_or(&empty);
+    let mut bars = Vec::with_capacity(timestamps.len());
+    for index in 0..timestamps.len() {
+        let Some(timestamp) = timestamps[index].as_i64() else {
+            continue;
+        };
+        let (Some(open), Some(high), Some(low), Some(close)) = (
+            opens.get(index).and_then(Value::as_f64),
+            highs.get(index).and_then(Value::as_f64),
+            lows.get(index).and_then(Value::as_f64),
+            closes.get(index).and_then(Value::as_f64),
+        ) else {
+            continue;
+        };
+        if !open.is_finite() || !high.is_finite() || !low.is_finite() || !close.is_finite() {
+            continue;
+        }
+        let open_time = bucket_start_ms(timeframe, timestamp * 1_000);
+        bars.push(Kline {
+            open_time,
+            close_time: next_bucket_start_ms(timeframe, open_time) - 1,
+            open,
+            high,
+            low,
+            close,
+            volume: volumes
+                .get(index)
+                .and_then(Value::as_f64)
+                .unwrap_or_default(),
+        });
+    }
+    if bars.is_empty() {
+        return Err(ProviderError::other(
+            "Yahoo Finance returned no usable OHLC bars",
+        ));
+    }
+    Ok(bars)
+}
+
+fn now_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs() as i64)
+}
+
+fn load_local(symbol: &str, timeframe: Timeframe, limit: usize) -> Vec<Kline> {
+    STORE
+        .get()
+        .and_then(|store| store.lock().ok())
+        .and_then(|store| {
+            store
+                .load_market_candles(DataSource::Yahoo, symbol, timeframe, limit)
+                .ok()
+        })
+        .unwrap_or_default()
+}
+
+fn save_local(symbol: &str, timeframe: Timeframe, bars: &[Kline]) {
+    if let Some(mut store) = STORE.get().and_then(|store| store.lock().ok()) {
+        let _ = store.save_market_candles(
+            DataSource::Yahoo,
+            symbol,
+            timeframe,
+            bars,
+            crate::clock::now_ms(),
+        );
+    }
+}
+
+fn url_encode(value: &str) -> String {
+    value
+        .bytes()
+        .flat_map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'-' | b'_' => vec![byte as char],
+            _ => format!("%{byte:02X}").chars().collect(),
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use crate::model::{TimeUnit, Timeframe};
     #[test]
-    fn test_normalize_nse_symbol() {
-        assert_eq!(normalize_nse_symbol("reliance"), "RELIANCE.NS");
-        assert_eq!(normalize_nse_symbol("RELIANCE.NS"), "RELIANCE.NS");
-        assert_eq!(normalize_nse_symbol("tcs"), "TCS.NS");
-        assert_eq!(normalize_nse_symbol("infy.NS"), "INFY.NS");
+    fn encodes_nse_symbol_without_changing_dot() {
+        assert_eq!(url_encode("RELIANCE.NS"), "RELIANCE.NS");
+        assert_eq!(url_encode("M&M.NS"), "M%26M.NS");
     }
-
     #[test]
-    fn test_yahoo_nse_updater_default() {
-        let updater = YahooNseUpdater::default();
-        let symbols = updater.symbols;
-        // Should have some NSE symbols
-        assert!(!symbols.is_empty());
-        // Check that symbols have .NS suffix
-        for symbol in &symbols {
-            assert!(symbol.to_uppercase().ends_with(".NS"), "Symbol should have .NS suffix: {}", symbol);
-        }
-    }
-
-    #[tokio::test]
-    async fn test_fetch_nse_universe() {
-        let symbols = fetch_nse_universe().await;
-        match symbols {
-            Ok(syms) => {
-                assert!(!syms.is_empty());
-                for symbol in &syms {
-                    println!("NSE symbol: {}", symbol);
-                }
-            }
-            Err(e) => {
-                // Expected - live API may not be available in test environment
-                println!("fetch_nse_universe error (expected in test): {}", e);
-            }
-        }
+    fn yahoo_supports_daily_weekly_and_monthly_only() {
+        assert_eq!(
+            yahoo_interval(Timeframe::new(1, TimeUnit::Day).unwrap()).unwrap(),
+            "1d"
+        );
+        assert!(yahoo_interval(Timeframe::new(4, TimeUnit::Hour).unwrap()).is_err());
     }
 }

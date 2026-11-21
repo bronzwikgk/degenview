@@ -106,6 +106,8 @@ impl QuoteProvider for LiveProvider {
             DataSource::CoinGecko => coingecko(requests).map(Outcome::from_quotes),
             DataSource::DexScreener => Ok(dexscreener(requests)),
             DataSource::Alpaca => alpaca(requests).map(Outcome::from_quotes),
+            // Yahoo chart data is supported; it has no batched quote endpoint in this provider.
+            DataSource::Yahoo => Ok(Outcome::default()),
             DataSource::Polymarket | DataSource::Kalshi => Ok(prediction(source, requests)),
             DataSource::CoinMarketCap => Ok(Outcome::default()),
         }

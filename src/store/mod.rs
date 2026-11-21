@@ -20,6 +20,7 @@ pub mod editor_theme;
 pub mod frame_cache;
 pub mod identity;
 pub mod mcp;
+pub mod market_data;
 pub mod paper;
 pub mod pine;
 pub mod pinned_timeframes;
@@ -120,6 +121,25 @@ impl Store {
                 position INTEGER PRIMARY KEY,
                 tab_ids TEXT NOT NULL
             );",
+        )?;
+
+        self.connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS market_candle (
+                source TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                open_time INTEGER NOT NULL,
+                close_time INTEGER NOT NULL,
+                open REAL NOT NULL,
+                high REAL NOT NULL,
+                low REAL NOT NULL,
+                close REAL NOT NULL,
+                volume REAL NOT NULL,
+                updated_at_ms INTEGER NOT NULL,
+                PRIMARY KEY (source, symbol, timeframe, open_time)
+            );
+            CREATE INDEX IF NOT EXISTS market_candle_recent
+                ON market_candle (source, symbol, timeframe, open_time DESC);",
         )?;
 
         // Portfolio ledger. Transaction order is significant to validation, so `position`

@@ -37,15 +37,70 @@ pub(super) fn appearance_page(
     }
 
     ui.add_space(16.0);
-    price_axis(ui, c.card, c.scale_mode).map(ChartSettingsAction::SetScaleMode);
-    
-    // Y-axis side selection
+    let scale_action = price_axis(ui, c.card, c.scale_mode).map(ChartSettingsAction::SetScaleMode);
+
     ui.add_space(8.0);
     y_axis_side_selector(ui, c.card);
-    
-    // X-axis format selector
+
     ui.add_space(8.0);
     x_axis_format_selector(ui, c.card);
+
+    scale_action
+}
+
+fn y_axis_side_selector(ui: &mut Ui, card_view: &mut ChartCard) {
+    use crate::model::chart::appearance::YAxisSide;
+
+    let labels = vec!["Left".to_owned(), "Right".to_owned()];
+    let selected = match card_view.appearance().y_axis_side() {
+        YAxisSide::Left => 0,
+        YAxisSide::Right => 1,
+    };
+    card::card(
+        ui,
+        Icon::Sliders,
+        "Price scale side",
+        Some("Places the chart's price scale on the selected edge."),
+        |ui| {
+            if let Some(index) = kit::menu_picker(ui, 100.0, &labels, selected, true) {
+                card_view.appearance_mut().y_axis_side = [YAxisSide::Left, YAxisSide::Right][index];
+            }
+        },
+    );
+}
+
+fn x_axis_format_selector(ui: &mut Ui, card_view: &mut ChartCard) {
+    use crate::model::chart::appearance::XAxisFormat;
+
+    let formats = [
+        XAxisFormat::Default,
+        XAxisFormat::DdMmYyyy,
+        XAxisFormat::MmDdYyyy,
+        XAxisFormat::YyyyMmDd,
+        XAxisFormat::Custom,
+    ];
+    let labels = vec![
+        "Automatic".to_owned(),
+        "DD/MM/YYYY".to_owned(),
+        "MM/DD/YYYY".to_owned(),
+        "YYYY-MM-DD".to_owned(),
+        "Custom".to_owned(),
+    ];
+    let selected = formats
+        .iter()
+        .position(|format| *format == card_view.appearance().x_axis_format())
+        .unwrap_or_default();
+    card::card(
+        ui,
+        Icon::Calendar,
+        "Time labels",
+        Some("Controls the date format drawn along the chart's time axis."),
+        |ui| {
+            if let Some(index) = kit::menu_picker(ui, 130.0, &labels, selected, true) {
+                card_view.appearance_mut().x_axis_format = formats[index];
+            }
+        },
+    );
 }
 
 /// What the price scale reads, for the line under the Scale picker.

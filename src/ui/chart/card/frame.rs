@@ -522,7 +522,16 @@ impl ChartCard {
             style,
             main_tag_y,
         );
-        self.draw_time_axis(painter, rect, shown, &ticks, &x_for, plot.right(), style);
+        self.draw_time_axis(
+            painter,
+            rect,
+            shown,
+            &ticks,
+            &x_for,
+            plot.right(),
+            style,
+            &self.appearance,
+        );
         // The tags of the lines at a price or a time sit on the axes, which the drawings'
         // clipped painter cannot reach.
         layer.paint_tags(&main_painter, rect, plot, &projection, style);

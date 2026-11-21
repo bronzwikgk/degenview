@@ -64,7 +64,7 @@ impl DataSource {
 
     /// The source a `watchlist_slug` names, in any case.
     pub fn from_watchlist_slug(slug: &str) -> Option<Self> {
-        const ALL: [DataSource; 13] = [
+        const ALL: [DataSource; 14] = [
             DataSource::Binance,
             DataSource::Coinbase,
             DataSource::Okx,
@@ -78,6 +78,7 @@ impl DataSource {
             DataSource::Polymarket,
             DataSource::Kalshi,
             DataSource::CoinMarketCap,
+            DataSource::Yahoo,
         ];
         ALL.into_iter()
             .find(|source| source.watchlist_slug().eq_ignore_ascii_case(slug))
@@ -116,18 +117,12 @@ impl DataSource {
     /// Whether this source reports per-candle turnover for the volume bars to draw. CoinGecko's
     /// OHLC endpoint has no volume column, and the line charts report none at all.
     pub fn provides_volume(self) -> bool {
-        matches!(
-            Self::Binance
-                | Self::Coinbase
-                | Self::Okx
-                | Self::Kraken
-                | Self::Bybit
-                | Self::Gate
-                | Self::Mexc
-                | Self::DexScreener
-                | Self::Alpaca
-                | Self::Yahoo
-        )
+        match self {
+            Self::Binance | Self::Coinbase | Self::Okx | Self::Kraken
+            | Self::Bybit | Self::Gate | Self::Mexc | Self::DexScreener
+            | Self::Alpaca | Self::Yahoo => true,
+            _ => false,
+        }
     }
 
     /// Whether this source's data is drawn as a line rather than candles.
@@ -175,7 +170,7 @@ impl DataSource {
                 .filter(|base| base.len() > 1)
                 .unwrap_or(head),
             Self::Mexc => split_mexc_pair(head).map(|(base, _)| base).unwrap_or(head),
-            Self::Yahoo => head,  // Yahoo NSE symbols: "RELIANCE.NS" -> "RELIANCE"
+            Self::Yahoo => head.trim_end_matches(".NS"),
             _ => head,
         }
         .to_owned()
@@ -337,6 +332,7 @@ mod tests {
         assert!(DataSource::Bybit.provides_volume());
         assert!(DataSource::Gate.provides_volume());
         assert!(DataSource::Mexc.provides_volume());
+        assert!(DataSource::Yahoo.provides_volume());
         assert!(!DataSource::CoinGecko.provides_volume());
         assert!(!DataSource::Polymarket.provides_volume());
         assert!(!DataSource::CoinMarketCap.provides_volume());

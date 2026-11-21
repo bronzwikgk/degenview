@@ -185,6 +185,7 @@ impl DegenViewApp {
             &creation.egui_ctx,
             crate::service::annotation::asset_host::AssetHost::new(store.clone()),
         );
+        crate::service::market::yahoo::install_store(store.clone());
         crate::service::cache::control::launch(&creation.egui_ctx);
         native_bridge::install(&creation.egui_ctx);
         if crate::ui::window::chrome::rounded_corners()
@@ -426,7 +427,7 @@ impl eframe::App for DegenViewApp {
         // Runs once per frame (not in `ui`, which also fires for the root viewport).
         self.tick_pine();
         self.tick_mcp(ctx);
-        self.mcp.shared().maybe_autosave();
+        self.mcp.maybe_autosave();
         self.updates.tick(ctx);
         self.tick_sync(ctx);
         self.tick_editor_themes();
