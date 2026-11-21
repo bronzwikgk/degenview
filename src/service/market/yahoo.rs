@@ -115,7 +115,11 @@ fn fetch_bars(
         "{CHART_URL}/{}?interval={interval}&events=history",
         url_encode(symbol.trim())
     );
-    if let Some(start_ms) = start_ms {
+    if start_ms == Some(0) && end_ms.is_none() {
+        // Yahoo rejects `period1=0`; its documented `range=max` means the earliest history it
+        // makes available for the requested interval.
+        url.push_str("&range=max");
+    } else if let Some(start_ms) = start_ms {
         url.push_str(&format!("&period1={}", start_ms.div_euclid(1_000)));
         if let Some(end_ms) = end_ms {
             url.push_str(&format!("&period2={}", end_ms.div_euclid(1_000)));

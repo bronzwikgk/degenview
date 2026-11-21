@@ -63,6 +63,7 @@ fn code(currency: PaperCurrency) -> &'static str {
         PaperCurrency::Usd => "USD",
         PaperCurrency::Eur => "EUR",
         PaperCurrency::Gbp => "GBP",
+        PaperCurrency::Inr => "INR",
         PaperCurrency::Jpy => "JPY",
         PaperCurrency::Usdt => "USDT",
         PaperCurrency::Usdc => "USDC",

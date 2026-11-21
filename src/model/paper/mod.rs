@@ -22,6 +22,8 @@ pub enum PaperCurrency {
     Usd,
     Eur,
     Gbp,
+    /// Indian rupees. Used by local paper accounts trading NSE/BSE charts.
+    Inr,
     Jpy,
     Usdt,
     Usdc,

@@ -462,9 +462,12 @@ impl ChartCard {
             // Use the x_axis_format from appearance to determine label format
             let label = match appearance.x_axis_format() {
                 // Default: use existing timestamp format
-                crate::model::chart::appearance::XAxisFormat::Default => {
-                    format::timestamp(candle.open_time)
+                crate::model::chart::appearance::XAxisFormat::Default
+                    if self.timeframe.is_some_and(|timeframe| !timeframe.is_intraday()) =>
+                {
+                    format::short_date(candle.open_time)
                 }
+                crate::model::chart::appearance::XAxisFormat::Default => format::timestamp(candle.open_time),
                 // Custom formats would be handled here; for now default
                 _ => format::timestamp(candle.open_time),
             };

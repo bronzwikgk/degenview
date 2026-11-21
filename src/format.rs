@@ -62,6 +62,12 @@ pub fn timestamp(epoch_ms: i64) -> String {
     )
 }
 
+/// Compact calendar date for daily-or-higher chart axes.
+pub fn short_date(epoch_ms: i64) -> String {
+    let (year, month, day) = civil_from_days(epoch_ms.div_euclid(86_400_000));
+    format!("{day:02}/{month:02}/{:02}", year.rem_euclid(100))
+}
+
 /// Reads a UTC date and time the way [`timestamp`] writes it: `YYYY-MM-DD`, `YYYY-MM-DD HH:MM` or
 /// `YYYY-MM-DD HH:MM:SS` (a `T` may stand for the space and a trailing `Z` is ignored). Returns
 /// epoch milliseconds, or `None` for anything that is not a real calendar moment.

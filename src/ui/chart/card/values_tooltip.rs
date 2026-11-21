@@ -126,7 +126,7 @@ impl ChartCard {
         show_volume: bool,
     ) -> (Vec<(String, String)>, usize) {
         let price_format = self.appearance.price_format();
-        let mut rows = self.readout_rows(info, index, candle, show_volume);
+        let mut rows = self.readout_rows(info, index, candle, previous_close, show_volume);
         if let Some(previous) = previous_close.filter(|previous| *previous != 0.0) {
             let change = candle.close - previous;
             let sign = if change < 0.0 { "−" } else { "+" };

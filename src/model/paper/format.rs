@@ -111,10 +111,11 @@ impl PaperOrderEventKind {
 }
 
 impl PaperCurrency {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Usd,
         Self::Eur,
         Self::Gbp,
+        Self::Inr,
         Self::Jpy,
         Self::Usdt,
         Self::Usdc,
@@ -125,6 +126,7 @@ impl PaperCurrency {
             Self::Usd => "USD",
             Self::Eur => "EUR",
             Self::Gbp => "GBP",
+            Self::Inr => "INR",
             Self::Jpy => "JPY",
             Self::Usdt => "USDT",
             Self::Usdc => "USDC",
@@ -137,6 +139,7 @@ impl PaperCurrency {
             Self::Eur => "€",
             Self::Gbp => "£",
             Self::Jpy => "¥",
+            Self::Inr => "INR ",
             Self::Usdt => "USDT ",
             Self::Usdc => "USDC ",
         }

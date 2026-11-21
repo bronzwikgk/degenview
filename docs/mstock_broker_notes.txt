@@ -1,0 +1,66 @@
+MStock Broker Integration - Implementation Notes
+
+This notes the addition of mstock broker type to the DegenView fork.
+
+## Current Status
+- mstock broker type NOT currently in the codebase
+- Existing broker infrastructure uses `degenview-brokers` crate
+- Coinbase broker is the primary supported broker
+
+## What Needs to be Added
+
+### 1. Broker Type Enum (src/host/broker/mod.rs)
+Add `mstock` to the broker types list, similar to how Coinbase is handled.
+
+### 2. Credential Storage (src/service/keychain/broker_secrets.rs)
+Add mstock secret key format and storage/retrieval methods.
+
+### 3. BrokerHost Initialization (src/host/broker/mod.rs)
+Add mstock to the list of brokers that BrokerHost can produce/manage.
+
+### 4. Order Placement (src/workplace/trade/broker.rs)
+Add mstock-specific order draft conversion and placement logic.
+
+### 5. UI Integration (src/workplace/trade/sheet.rs)
+Add mstock account selection and order submission UI.
+
+### 6. MCP Integration (src/host/mcp/)
+Add mstock-related MCP commands if needed for agent control.
+
+## Implementation Pattern (based on Coinbase)
+
+The existing Coinbase broker implementation in `src/host/broker/mod.rs` serves as the template:
+
+```rust
+// Example pattern from existing code
+pub const COINBASE: BrokerId = BrokerId::new("coinbase");
+```
+
+Would need something similar:
+```rust
+pub const MSTOCK: BrokerId = BrokerId::new("mstock");
+```
+
+And connection handling following the same pattern as `COINBASE`.
+
+## Required Files to Modify
+
+1. `src/host/broker/mod.rs` - Add mstock BrokerId and BrokerHost support
+2. `src/service/keychain/broker_secrets.rs` - Add mstock credential key
+3. `src/workplace/trade/broker.rs` - Add mstock order handling
+4. `src/workplace/trade/sheet.rs` - Add mstock account UI
+5. `src/app/mod.rs` - Initialize BrokerHost with mstock support
+
+## Dependencies
+- The `degenview-brokers` crate must support mstock, OR
+- Custom broker implementation using the broker SDK
+
+## Next Steps
+1. Determine if `degenview-brokers` crate supports mstock
+2. If yes: add mstock type and minimal integration
+3. If no: implement custom mstock broker following the Coinbase pattern
+4. Test with mstock broker credentials
+5. Add UI controls for mstock account management
+
+## Contact
+If you have mstock API documentation or credentials, please share them for proper implementation.

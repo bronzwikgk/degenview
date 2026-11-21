@@ -75,4 +75,10 @@ All changes made by AI agents will be recorded here with timestamps, reasons, an
   - `src/service/market/yahoo.rs`: Fixed `your_price source` → `your_price_source` field name; fixed format string in `fetch_nse_candles()`
   - `src/model/market/source.rs`: `provides_volume()` already includes `Self::Yahoo`; compilation errors resolved
   - `CHANGELOG_OPENAI.md`: Documents all changes with timestamps, reasons, and file locations
+
+## Entry 9 - MStock Broker Integration
+- **Timestamp**: 2026-11-21 HH:MM
+- **Change**: Added `mstock` broker type integration with connection management, account handling, and order placement support
+- **Why**: Enable support for mstock brokerage platform, extending the existing broker infrastructure to support additional trading venues
+- **Location**: `src/host/broker/mod.rs`: Added `mstock` broker type enumeration and connection handling; `src/service/keychain/broker_secrets.rs`: Added mstock credential storage; `src/app/mod.rs`: BrokerHost initialization with mstock support; `src/workplace/trade/broker.rs`: mstock order placement logic
 --

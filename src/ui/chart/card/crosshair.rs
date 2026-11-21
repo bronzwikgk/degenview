@@ -186,7 +186,7 @@ impl ChartCard {
         show_volume: bool,
     ) -> f32 {
         let color = self.bar_color(bar.1, bar.2);
-        let items = self.readout_rows(info, bar.0, bar.1, show_volume);
+        let items = self.readout_rows(info, bar.0, bar.1, bar.2, show_volume);
         paint_ohlc_readout(painter, plot, &items, color)
     }
 
@@ -197,6 +197,7 @@ impl ChartCard {
         info: &CrosshairBars,
         index: usize,
         candle: &Kline,
+        previous_close: Option<f64>,
         show_volume: bool,
     ) -> Vec<(String, String)> {
         let constructed = info.synthetic.and_then(|bars| bars.get(index));
@@ -207,6 +208,10 @@ impl ChartCard {
                 "Vol".to_owned(),
                 crate::model::watchlist::quote::compact_number(candle.volume),
             ));
+        }
+        if let Some(previous) = previous_close.filter(|previous| *previous > 0.0) {
+            let daily_return = (candle.close / previous - 1.0) * 100.0;
+            items.push(("Ret".to_owned(), format!("{daily_return:+.2}%")));
         }
         // The market's own price, apart from the constructed bar's.
         if constructed.is_some()
