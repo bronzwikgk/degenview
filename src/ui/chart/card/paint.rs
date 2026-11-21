@@ -452,13 +452,22 @@ impl ChartCard {
         x_for: &dyn Fn(usize) -> f32,
         plot_right: f32,
         style: &CanvasStyle,
+        appearance: &ChartAppearance,
     ) {
         let y = rect.bottom() - style.time_axis_height() / 2.0;
         for index in ticks {
             let Some(candle) = candles.get(*index) else {
                 continue;
             };
-            let label = format::timestamp(candle.open_time);
+            // Use the x_axis_format from appearance to determine label format
+            let label = match appearance.x_axis_format() {
+                // Default: use existing timestamp format
+                crate::model::chart::appearance::XAxisFormat::Default => {
+                    format::timestamp(candle.open_time)
+                }
+                // Custom formats would be handled here; for now default
+                _ => format::timestamp(candle.open_time),
+            };
             let x = x_for(*index);
             // A label that would hang over the plot's right edge waits for the chart to move, as a
             // price label does at the plot's top and bottom: it would run into the price axis and

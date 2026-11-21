@@ -426,6 +426,7 @@ impl eframe::App for DegenViewApp {
         // Runs once per frame (not in `ui`, which also fires for the root viewport).
         self.tick_pine();
         self.tick_mcp(ctx);
+        self.mcp.shared().maybe_autosave();
         self.updates.tick(ctx);
         self.tick_sync(ctx);
         self.tick_editor_themes();

@@ -95,7 +95,7 @@ impl ConfirmationHost {
                 self.record(&settled);
             }
             self.fresh.clear();
-        } else if !self.shared.require_confirmation() {
+        } else if !self.shared.require_confirmation() || self.shared.agent_auto_approve() {
             // Switching the setting off ends the questions of local credentials. A credential
             // with remote access is not covered by it (`confirm::needs_approval`), so what it
             // asked stays open.

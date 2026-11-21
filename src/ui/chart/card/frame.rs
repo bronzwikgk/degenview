@@ -562,9 +562,14 @@ impl ChartCard {
                 tooltip = tooltip.or(pane_tooltip);
             }
             // The price axis' edge runs on through the pane.
+            let y_axis_side = self.appearance.y_axis_side();
+            let x_position = match y_axis_side {
+                crate::model::chart::appearance::YAxisSide::Left => plot.left(),
+                crate::model::chart::appearance::YAxisSide::Right => plot.right(),
+            };
             canvas::vertical(
                 painter,
-                plot.right(),
+                x_position,
                 (pane_rect.top(), pane_rect.bottom()),
                 canvas::solid(style.scale_line),
             );

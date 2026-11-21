@@ -19,6 +19,7 @@ pub enum DataSource {
     Polymarket,
     Kalshi,
     CoinMarketCap,
+    Yahoo,
 }
 
 impl DataSource {
@@ -37,6 +38,7 @@ impl DataSource {
             Self::Polymarket => "Polymarket",
             Self::Kalshi => "Kalshi",
             Self::CoinMarketCap => "CoinMarketCap",
+            Self::Yahoo => "Yahoo Finance",
         }
     }
 
@@ -56,6 +58,7 @@ impl DataSource {
             Self::Polymarket => "POLYMARKET",
             Self::Kalshi => "KALSHI",
             Self::CoinMarketCap => "CMC",
+            Self::Yahoo => "YAHOO",
         }
     }
 
@@ -114,7 +117,6 @@ impl DataSource {
     /// OHLC endpoint has no volume column, and the line charts report none at all.
     pub fn provides_volume(self) -> bool {
         matches!(
-            self,
             Self::Binance
                 | Self::Coinbase
                 | Self::Okx
@@ -124,6 +126,7 @@ impl DataSource {
                 | Self::Mexc
                 | Self::DexScreener
                 | Self::Alpaca
+                | Self::Yahoo
         )
     }
 
@@ -154,6 +157,7 @@ impl DataSource {
             | Self::CoinGecko
             | Self::Alpaca => raw.to_uppercase(),
             Self::CoinMarketCap => super::cmc::title(raw).to_owned(),
+            Self::Yahoo => raw.to_owned(),  // Yahoo symbols like "RELIANCE.NS" passed through
             _ => raw.to_owned(),
         }
     }
@@ -171,6 +175,7 @@ impl DataSource {
                 .filter(|base| base.len() > 1)
                 .unwrap_or(head),
             Self::Mexc => split_mexc_pair(head).map(|(base, _)| base).unwrap_or(head),
+            Self::Yahoo => head,  // Yahoo NSE symbols: "RELIANCE.NS" -> "RELIANCE"
             _ => head,
         }
         .to_owned()

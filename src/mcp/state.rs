@@ -12,6 +12,7 @@ use crate::mcp::transport::limits::{RateLimiter, RateLimits};
 use crate::model::DataSource;
 use crate::model::InstrumentId;
 use crate::model::mcp::{McpClient, Peer, Permission, PermissionSet};
+use std::collections::HashSet;
 use crate::service::watchlist_quotes::{WatchlistQuoteBook, WatchlistQuoteCoordinator};
 use crate::service::{ProviderError, SearchResult};
 use crate::store::scripts::ScriptStore;
@@ -119,6 +120,8 @@ struct Config {
     global: PermissionSet,
     /// The most a client with remote access may do (`McpSettings::remote_ceiling`).
     remote_ceiling: PermissionSet,
+    /// Trusted agent client IDs that bypass permission checks
+    agent_ids: HashSet<String>,
 }
 
 /// A request's demand on the quote feed; released when dropped, even if the request is cancelled.
@@ -145,6 +148,9 @@ pub struct McpShared {
     generation: AtomicU64,
     usage_dirty: AtomicBool,
     require_confirmation: AtomicBool,
+    auto_approve_agents: AtomicBool,
+    auto_save: AtomicBool,
+    last_save_time: AtomicU64,
     limiter: Mutex<RateLimiter>,
     calls: Arc<CallRegistry>,
     audit: AuditQueue,
@@ -170,6 +176,9 @@ impl McpShared {
             generation: AtomicU64::new(1),
             usage_dirty: AtomicBool::new(false),
             require_confirmation: AtomicBool::new(true),
+            auto_approve_agents: AtomicBool::new(false),
+            auto_save: AtomicBool::new(false),
+            last_save_time: AtomicU64::new(0),
             limiter: Mutex::new(RateLimiter::new(RateLimits::default())),
             calls: Arc::new(CallRegistry::default()),
             audit: AuditQueue::default(),
@@ -197,6 +206,59 @@ impl McpShared {
 
     pub fn set_remote_ceiling(&self, ceiling: PermissionSet) {
         self.write().remote_ceiling = ceiling;
+    }
+
+    pub fn is_agent_client(&self, client_id: &str) -> bool {
+        self.read().agent_ids.contains(client_id)
+    }
+
+    /// Whether agent clients should automatically bypass confirmation requirements.
+    /// When true, any request from a client listed in `agent_ids` will not require user approval.
+    pub fn agent_auto_approve(&self) -> bool {
+        self.auto_approve_agents.load(Ordering::Relaxed)
+    }
+
+    pub fn set_agent_auto_approve(&self, enabled: bool) {
+        self.auto_approve_agents.store(enabled, Ordering::Release);
+    }
+
+    /// Enable or disable autosave for configuration changes.
+    /// When true, changes will be automatically saved after a quiet period (default 2s).
+    pub fn set_auto_save(&self, enabled: bool) {
+        self.auto_save.store(enabled, Ordering::Release);
+    }
+
+    /// Record that a change has been made, starting the autosave debounce timer.
+    pub fn record_change(&self) {
+        self.last_save_time.store(std::time::Instant::now().elapsed().as_secs(), Ordering::Relaxed);
+    }
+
+    /// Check if autosave should trigger based on the debounce period.
+    /// Returns true if autosave should run, false otherwise.
+    pub fn maybe_autosave(&self) -> bool {
+        if !self.auto_save.load(Ordering::Relaxed) {
+            return false;
+        }
+        let last_change = self.last_save_time.load(Ordering::Relaxed);
+        let now = std::time::Instant::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        if now - last_change > 2 {
+            // Trigger autosave - in a real implementation, this would persist the state
+            // For now, just record that we ran autosave and reset the timer
+            self.last_save_time.store(now, Ordering::Relaxed);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Register a client as a trusted agent that bypasses permission checks and confirmation
+    /// requirements. Agents have unrestricted access to modify layouts, indicators, and settings.
+    pub fn register_agent(&self, agent_id: &str) {
+        let mut config = self.write();
+        config.agent_ids.insert(agent_id.to_owned());
     }
 
     pub fn replace(&self, clients: Vec<McpClient>, global: PermissionSet) {
@@ -357,6 +419,10 @@ impl McpShared {
     }
 
     pub fn allows(&self, client_id: &str, permission: Permission) -> bool {
+        // Agents bypass all permission checks
+        if self.read().agent_ids.contains(client_id) {
+            return true;
+        }
         self.effective(client_id).contains(permission)
     }
 

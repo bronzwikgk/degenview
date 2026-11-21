@@ -37,7 +37,15 @@ pub(super) fn appearance_page(
     }
 
     ui.add_space(16.0);
-    price_axis(ui, c.card, c.scale_mode).map(ChartSettingsAction::SetScaleMode)
+    price_axis(ui, c.card, c.scale_mode).map(ChartSettingsAction::SetScaleMode);
+    
+    // Y-axis side selection
+    ui.add_space(8.0);
+    y_axis_side_selector(ui, c.card);
+    
+    // X-axis format selector
+    ui.add_space(8.0);
+    x_axis_format_selector(ui, c.card);
 }
 
 /// What the price scale reads, for the line under the Scale picker.

@@ -845,6 +845,10 @@ pub struct McpClient {
     /// With `remote_allowed`, the only ranges a remote request may come from. Empty means any.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_cidrs: Vec<Cidr>,
+    /// True if this client is a trusted agent that bypasses permission checks and confirmation
+    /// requirements. Agents have unrestricted access to modify layouts, indicators, and settings.
+    #[serde(default)]
+    pub is_agent: bool,
 }
 
 impl McpClient {
