@@ -182,6 +182,10 @@ pub const GECKOTERMINAL_PAGE: usize = 1_000;
 /// How far back GeckoTerminal's free API reaches, in days.
 pub const GECKOTERMINAL_HISTORY_DAYS: i64 = 180;
 
+/// Local CSV files provide daily OHLCV bars; coarser timeframes (`2D`, `1W`, `1M`, `1Y`, ...) fold
+/// from days automatically.
+const LOCAL: [Timeframe; 1] = [Timeframe::DAY_1];
+
 impl DataSource {
     /// The candle lengths the source serves itself, shortest first. Empty for a source that has no
     /// candles to ask for (CoinGecko builds them from prices, the line charts are not candles).
@@ -196,6 +200,7 @@ impl DataSource {
             Self::Mexc => &MEXC,
             Self::Alpaca => &ALPACA,
             Self::Yahoo => &YAHOO,
+            Self::Local => &LOCAL,
             Self::DexScreener => &GECKOTERMINAL,
             Self::CoinGecko | Self::Polymarket | Self::Kalshi | Self::CoinMarketCap => &[],
         }
@@ -220,6 +225,7 @@ impl DataSource {
             | Self::Mexc
             | Self::Alpaca
             | Self::Yahoo
+            | Self::Local
             | Self::DexScreener => self.plan(timeframe).is_some(),
             Self::CoinGecko => samples::chart_days(timeframe, 1).is_some(),
             Self::Polymarket | Self::Kalshi | Self::CoinMarketCap => true,
@@ -241,7 +247,8 @@ impl DataSource {
             | Self::Gate
             | Self::Mexc
             | Self::Alpaca
-            | Self::Yahoo => true,
+            | Self::Yahoo
+            | Self::Local => true,
             Self::DexScreener => self.plan(timeframe).is_some_and(|plan| {
                 let page_days = plan.base().nominal_ms() * GECKOTERMINAL_PAGE as i64 / 86_400_000;
                 page_days < GECKOTERMINAL_HISTORY_DAYS

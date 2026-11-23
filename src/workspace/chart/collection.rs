@@ -432,7 +432,9 @@ impl ChartWorkspace {
             return false;
         }
         chart.replace_market(item);
+        let sym = item.instrument.symbol.clone();
         self.market_changed(chart_id, ctx);
+        self.open_or_create_stock_layout(&sym, ctx);
         true
     }
 

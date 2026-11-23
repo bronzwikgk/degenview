@@ -1,5 +1,5 @@
 [package]
-name = "degenview"
+name = "degenview_gk"
 version = "0.6.0-rc.32"
 edition = "2024"
 rust-version = "1.95"

@@ -215,8 +215,10 @@ fn resolve(source: DataSource, ticker: &str, base: &str) -> (Option<String>, boo
             Err(()) => (None, true),
         };
     }
-    // The other prediction markets have no coin behind them, and a CoinMarketCap card is an index.
-    if source.is_prediction_market() || source == DataSource::CoinMarketCap {
+    // The other prediction markets have no coin behind them, and CoinMarketCap / Local CSV use monograms.
+    if source.is_prediction_market()
+        || matches!(source, DataSource::CoinMarketCap | DataSource::Local)
+    {
         return (None, false);
     }
     if source == DataSource::Alpaca {

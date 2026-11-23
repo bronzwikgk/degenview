@@ -6,7 +6,7 @@ use eframe::egui;
 use std::time::{Duration, Instant};
 
 /// How long the layout must sit unchanged before an autosave-enabled layout is written.
-const AUTOSAVE_DELAY: Duration = Duration::from_secs(2);
+const AUTOSAVE_DELAY: Duration = Duration::from_secs(20);
 
 /// What the debounce wants done this frame.
 #[derive(Debug, Eq, PartialEq)]
@@ -61,7 +61,7 @@ impl AutosaveState {
 impl ChartWorkspace {
     pub(in crate::workspace) fn autosave_enabled(&self) -> bool {
         self.active_view()
-            .is_some_and(|view| view.autosave == Some(true))
+            .map_or(true, |view| view.autosave != Some(false))
     }
 
     pub(in crate::workspace) fn set_autosave(&mut self, enabled: bool) {

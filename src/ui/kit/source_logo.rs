@@ -26,6 +26,7 @@ fn source(source: DataSource) -> ImageSource<'static> {
             egui::include_image!("../../../assets/source_logos/coinmarketcap.svg")
         }
         DataSource::Yahoo => egui::include_image!("../../../assets/source_logos/yahoo.svg"),
+        DataSource::Local => egui::include_image!("../../../assets/source_logos/local_nse.svg"),
     }
 }
 

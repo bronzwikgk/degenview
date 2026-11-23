@@ -37,7 +37,7 @@ impl Store {
                     .collect(),
                 autosave: views
                     .iter()
-                    .filter(|view| view.autosave == Some(true))
+                    .filter(|view| view.autosave != Some(false))
                     .map(|view| view.id)
                     .collect(),
             }

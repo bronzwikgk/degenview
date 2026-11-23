@@ -344,6 +344,13 @@ fn instrument_from(token: &str) -> Result<WatchlistInstrument, String> {
             Ok(found)
         }
         DataSource::CoinMarketCap => Err("CoinMarketCap index charts aren't markets".to_owned()),
+        DataSource::Local => {
+            let symbol = rest.trim().to_uppercase();
+            if symbol.is_empty() {
+                return Err("NSE symbols look like RELIANCE or TCS".to_owned());
+            }
+            Ok(item(source, &symbol, &symbol, &symbol))
+        }
     }
 }
 

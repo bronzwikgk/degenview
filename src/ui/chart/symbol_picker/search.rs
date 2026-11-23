@@ -25,7 +25,9 @@ const RELATED_LIMIT: usize = 6;
 
 /// The markets the picker lists, in the order the providers are asked (and so the order exchanges
 /// that list the same market appear in).
-pub const PROVIDERS: [DataSource; 11] = [
+pub const PROVIDERS: [DataSource; 12] = [
+    DataSource::Local,
+    DataSource::Yahoo,
     DataSource::Binance,
     DataSource::Coinbase,
     DataSource::Okx,
@@ -36,7 +38,6 @@ pub const PROVIDERS: [DataSource; 11] = [
     DataSource::DexScreener,
     DataSource::CoinGecko,
     DataSource::Alpaca,
-    DataSource::Yahoo,
 ];
 
 /// The prediction markets the Predictions tab asks, in the order their answers are listed.
@@ -81,10 +82,10 @@ impl Scope {
     pub fn includes(self, source: DataSource) -> bool {
         match self {
             Self::All | Self::Watchlists => PROVIDERS.contains(&source),
-            Self::Stocks => matches!(source, DataSource::Alpaca | DataSource::Yahoo),
+            Self::Stocks => matches!(source, DataSource::Alpaca | DataSource::Yahoo | DataSource::Local),
             Self::Crypto => {
                 PROVIDERS.contains(&source)
-                    && !matches!(source, DataSource::Alpaca | DataSource::Yahoo)
+                    && !matches!(source, DataSource::Alpaca | DataSource::Yahoo | DataSource::Local)
             }
             Self::Predictions => PREDICTION_PROVIDERS.contains(&source),
             Self::Dashboards => source == DataSource::CoinMarketCap,
@@ -140,6 +141,7 @@ impl Scope {
 /// Markets offered before anything is typed and nothing has been picked yet: the largest crypto
 /// dollar pairs and the biggest US stocks, from the lists in `picker_kit::suggestions`.
 pub fn popular() -> Vec<SearchResult> {
+    let local = crate::service::market::local_csv::featured_results();
     let crypto = CRYPTO_SUGGESTIONS.iter().map(|base| {
         let symbol = format!("{base}USDT");
         SearchResult::new(DataSource::Binance, symbol.clone(), symbol).pair(*base, "USDT")
@@ -147,13 +149,13 @@ pub fn popular() -> Vec<SearchResult> {
     let stocks = STOCK_SUGGESTIONS
         .iter()
         .map(|ticker| SearchResult::new(DataSource::Alpaca, *ticker, *ticker));
-    crypto.chain(stocks).collect()
+    local.into_iter().chain(crypto).chain(stocks).collect()
 }
 
 /// What kind of market a provider lists, as the list's right-hand column says it.
 pub fn market_kind(source: DataSource) -> &'static str {
     match source {
-        DataSource::Alpaca | DataSource::Yahoo => "Stock",
+        DataSource::Alpaca | DataSource::Yahoo | DataSource::Local => "Stock",
         DataSource::Polymarket | DataSource::Kalshi => "Prediction",
         DataSource::CoinMarketCap => "Index",
         _ => "Crypto",
@@ -173,6 +175,7 @@ pub fn trading_kind(source: DataSource) -> &'static str {
         DataSource::DexScreener => "DEX",
         DataSource::CoinGecko => "Aggregate",
         DataSource::Alpaca | DataSource::Yahoo => "Stock",
+        DataSource::Local => "Local CSV",
         _ => "",
     }
 }

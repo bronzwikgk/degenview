@@ -20,6 +20,7 @@ pub enum DataSource {
     Kalshi,
     CoinMarketCap,
     Yahoo,
+    Local,
 }
 
 impl DataSource {
@@ -39,6 +40,7 @@ impl DataSource {
             Self::Kalshi => "Kalshi",
             Self::CoinMarketCap => "CoinMarketCap",
             Self::Yahoo => "Yahoo Finance",
+            Self::Local => "NSE (Local)",
         }
     }
 
@@ -59,12 +61,13 @@ impl DataSource {
             Self::Kalshi => "KALSHI",
             Self::CoinMarketCap => "CMC",
             Self::Yahoo => "YAHOO",
+            Self::Local => "NSE",
         }
     }
 
     /// The source a `watchlist_slug` names, in any case.
     pub fn from_watchlist_slug(slug: &str) -> Option<Self> {
-        const ALL: [DataSource; 14] = [
+        const ALL: [DataSource; 15] = [
             DataSource::Binance,
             DataSource::Coinbase,
             DataSource::Okx,
@@ -79,6 +82,7 @@ impl DataSource {
             DataSource::Kalshi,
             DataSource::CoinMarketCap,
             DataSource::Yahoo,
+            DataSource::Local,
         ];
         ALL.into_iter()
             .find(|source| source.watchlist_slug().eq_ignore_ascii_case(slug))
@@ -120,7 +124,7 @@ impl DataSource {
         match self {
             Self::Binance | Self::Coinbase | Self::Okx | Self::Kraken
             | Self::Bybit | Self::Gate | Self::Mexc | Self::DexScreener
-            | Self::Alpaca | Self::Yahoo => true,
+            | Self::Alpaca | Self::Yahoo | Self::Local => true,
             _ => false,
         }
     }
@@ -152,6 +156,7 @@ impl DataSource {
             | Self::CoinGecko
             | Self::Alpaca => raw.to_uppercase(),
             Self::CoinMarketCap => super::cmc::title(raw).to_owned(),
+            Self::Local => raw.to_uppercase(),
             Self::Yahoo => raw.to_owned(),  // Yahoo symbols like "RELIANCE.NS" passed through
             _ => raw.to_owned(),
         }

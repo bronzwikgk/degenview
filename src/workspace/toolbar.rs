@@ -25,7 +25,7 @@ impl ChartWorkspace {
         let mut delete_id: Option<u64> = None;
         let layouts = &layout_index.layouts;
         let dirty = self.is_dirty();
-        let autosave_on = active_view_id.is_some_and(|id| layout_index.autosave.contains(&id));
+        let autosave_on = active_view_id.map_or(true, |id| layout_index.autosave.contains(&id));
         // An Autosave layout also saves drawing-only edits; the toolbar's "unsaved" state does not
         // count them, as before.
         self.tick_autosave(

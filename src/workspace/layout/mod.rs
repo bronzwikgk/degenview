@@ -328,7 +328,43 @@ impl ChartWorkspace {
         }
     }
 
-    fn apply_saved_view_by_id(&mut self, id: u64, ctx: &egui::Context) {
+    /// When switching to a stock, flush any existing autosave layout, and either open
+    /// the layout matching that symbol or save the current workspace under the stock's symbol.
+    pub(in crate::workspace) fn open_or_create_stock_layout(
+        &mut self,
+        symbol: &str,
+        ctx: &egui::Context,
+    ) {
+        let sym = symbol.trim();
+        if sym.is_empty() {
+            return;
+        }
+        // If current layout is already for this stock, no need to recreate or switch
+        if self
+            .layout
+            .active_view_name
+            .as_deref()
+            .is_some_and(|name| name.eq_ignore_ascii_case(sym))
+        {
+            return;
+        }
+
+        // Flush existing autosave before changing layout
+        self.flush_autosave();
+
+        let views = self.load_saved_views();
+        if let Some(existing) = views
+            .iter()
+            .find(|v| v.name.eq_ignore_ascii_case(sym))
+        {
+            self.apply_saved_view(existing, ctx);
+        } else {
+            // Create a new layout named after the stock with autosave on
+            self.save_named(sym.to_string(), Some(true));
+        }
+    }
+
+    pub(super) fn apply_saved_view_by_id(&mut self, id: u64, ctx: &egui::Context) {
         let Some(view) = self
             .load_saved_views()
             .into_iter()

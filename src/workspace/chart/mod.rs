@@ -203,7 +203,8 @@ impl Chart {
             | DataSource::Mexc
             | DataSource::CoinGecko
             | DataSource::Alpaca
-            | DataSource::Yahoo => self.source.display_symbol(&self.symbol),
+            | DataSource::Yahoo
+            | DataSource::Local => self.source.display_symbol(&self.symbol),
             DataSource::DexScreener => self.source.base_asset(&self.display_title()),
             DataSource::Polymarket | DataSource::Kalshi | DataSource::CoinMarketCap => {
                 String::new()

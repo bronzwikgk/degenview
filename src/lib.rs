@@ -61,27 +61,31 @@ pub fn run_gui_with(
     ))?);
     #[cfg(not(target_os = "macos"))]
     let icon = ui::window::chrome::app_icon();
-    let options = eframe::NativeOptions {
+    let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("DegenView")
+            .with_title("DegenView GK")
             .with_app_id(ui::window::chrome::APP_ID)
             // The surface is shared by every window, and eframe reads whether it may be
             // transparent from this first one (`ui::window::corners`).
             .with_transparent(ui::window::chrome::rounded_corners())
             .with_icon(icon)
             .with_inner_size([1.0, 1.0])
-            .with_position([-10_000.0, -10_000.0])
-            // The root is only the coordinator. Wayland cannot hide a window, so `degenview-eframe`
-            // (eframe with a Wayland fix) never presents a viewport asked to be hidden: the root
-            // stays unmapped.
-            // Elsewhere eframe still shows it for its first frame, and `DegenViewApp::ui` hides it.
-            .with_visible(false),
+            .with_position([-10_000.0, -10_000.0]),
         ..Default::default()
     };
+    // Avoid Vulkan driver crashes (e.g. older Intel igvk64.dll) on Windows unless explicitly requested.
+    #[cfg(windows)]
+    if std::env::var_os("WGPU_BACKEND").is_none()
+        && let eframe::egui_wgpu::WgpuSetup::CreateNew(ref mut create_new) =
+            options.wgpu_options.wgpu_setup
+    {
+        create_new.instance_descriptor.backends =
+            eframe::wgpu::Backends::DX12 | eframe::wgpu::Backends::GL;
+    }
 
     crash_report::note("creating the window and graphics");
     Ok(eframe::run_native(
-        "DegenView",
+        "DegenView GK",
         options,
         Box::new(move |creation| {
             // Which adapter and backend was chosen is the first thing to ask about a start that

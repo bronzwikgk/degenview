@@ -26,7 +26,7 @@ impl ChangeBasis {
             | DataSource::Mexc
             | DataSource::CoinGecko
             | DataSource::DexScreener => Self::Rolling24h,
-            DataSource::Alpaca | DataSource::Yahoo => Self::PreviousClose,
+            DataSource::Alpaca | DataSource::Yahoo | DataSource::Local => Self::PreviousClose,
             DataSource::Polymarket | DataSource::Kalshi | DataSource::CoinMarketCap => Self::Window,
         }
     }
@@ -179,7 +179,10 @@ pub fn refresh_interval_secs(source: DataSource) -> u64 {
         | DataSource::Alpaca => 5,
         DataSource::Yahoo => 30,
         DataSource::DexScreener => 10,
-        DataSource::CoinGecko | DataSource::Polymarket | DataSource::Kalshi => 30,
+        DataSource::CoinGecko
+        | DataSource::Polymarket
+        | DataSource::Kalshi
+        | DataSource::Local => 30,
         DataSource::CoinMarketCap => 0,
     }
 }
@@ -199,7 +202,10 @@ pub fn maximum_age_secs(source: DataSource) -> i64 {
         DataSource::DexScreener => 60,
         // Coinbase is refreshed from REST every 30 seconds when the socket has been quiet.
         DataSource::Coinbase => 90,
-        DataSource::CoinGecko | DataSource::Polymarket | DataSource::Kalshi => 120,
+        DataSource::CoinGecko
+        | DataSource::Polymarket
+        | DataSource::Kalshi
+        | DataSource::Local => 120,
         DataSource::CoinMarketCap => 0,
     }
 }

@@ -110,6 +110,7 @@ impl QuoteProvider for LiveProvider {
             DataSource::Yahoo => Ok(Outcome::default()),
             DataSource::Polymarket | DataSource::Kalshi => Ok(prediction(source, requests)),
             DataSource::CoinMarketCap => Ok(Outcome::default()),
+            DataSource::Local => Ok(local_csv(requests)),
         }
     }
 
@@ -179,6 +180,16 @@ pub fn binance_url(requests: &[QuoteRequest]) -> String {
         .collect::<Vec<_>>()
         .join("%2C");
     format!("https://api.binance.com/api/v3/ticker/24hr?symbols=%5B{list}%5D&type=MINI")
+}
+
+fn local_csv(requests: &[QuoteRequest]) -> Outcome {
+    let mut quotes = HashMap::new();
+    for request in requests {
+        if let Some(quote) = crate::service::market::local_csv::quote_for_symbol(&request.symbol) {
+            quotes.insert(request.symbol.clone(), quote);
+        }
+    }
+    Outcome::from_quotes(quotes)
 }
 
 fn binance(requests: &[QuoteRequest]) -> Result<HashMap<String, SourceQuote>, QuoteFailure> {

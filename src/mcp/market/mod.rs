@@ -93,6 +93,7 @@ pub fn source_id(source: DataSource) -> &'static str {
         DataSource::Kalshi => "kalshi",
         DataSource::CoinMarketCap => "coinmarketcap",
         DataSource::Yahoo => "yahoo",
+        DataSource::Local => "nse",
     }
 }
 

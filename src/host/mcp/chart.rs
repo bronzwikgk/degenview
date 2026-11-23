@@ -176,6 +176,7 @@ pub fn source_slug(source: DataSource) -> &'static str {
         DataSource::Kalshi => "kalshi",
         DataSource::CoinMarketCap => "coinmarketcap",
         DataSource::Yahoo => "yahoo",
+        DataSource::Local => "nse",
     }
 }
 

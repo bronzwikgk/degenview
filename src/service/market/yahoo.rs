@@ -15,6 +15,10 @@ use std::sync::OnceLock;
 const CHART_URL: &str = "https://query1.finance.yahoo.com/v8/finance/chart";
 const SEARCH_URL: &str = "https://query1.finance.yahoo.com/v1/finance/search";
 const MAX_BARS: usize = 10_000;
+const YAHOO_HEADERS: [(&str, &str); 2] = [
+    ("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+    ("Accept", "*/*"),
+];
 
 pub struct Yahoo;
 pub const YAHOO: Yahoo = Yahoo;
@@ -78,7 +82,7 @@ impl MarketSource for Yahoo {
         );
         let body = crate::service::net::http::get_text(
             &url,
-            &[],
+            &YAHOO_HEADERS,
             crate::service::net::http::Retry::Transient,
         )
         .map_err(ProviderError::from)?;
@@ -137,7 +141,7 @@ fn fetch_bars(
         ));
     }
     let body =
-        crate::service::net::http::get_text(&url, &[], crate::service::net::http::Retry::Transient)
+        crate::service::net::http::get_text(&url, &YAHOO_HEADERS, crate::service::net::http::Retry::Transient)
             .map_err(ProviderError::from)?;
     parse_bars(&body, timeframe)
 }
