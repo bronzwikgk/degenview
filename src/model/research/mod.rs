@@ -166,6 +166,97 @@ pub fn historical_fill(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HistoricalConfig {
+    pub execution: ExecutionModel,
+    pub stop_loss_pct: f64,
+    pub target_pct: f64,
+    pub max_holding_bars: usize,
+    pub commission_pct: f64,
+    pub slippage_pct: f64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ExitReason {
+    Target,
+    Stop,
+    Time,
+    EndOfData,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HistoricalTrade {
+    pub entry_bar: usize,
+    pub exit_bar: usize,
+    pub entry: f64,
+    pub exit: f64,
+    pub net_return_pct: f64,
+    pub reason: ExitReason,
+}
+
+/// Deterministic long-only OHLC simulator. `entries[i]` is known only at the close of candle i.
+/// It therefore fills at that close or the next bar's open; no future bar is read to create entry.
+pub fn simulate_long(
+    candles: &[Kline],
+    entries: &[bool],
+    config: HistoricalConfig,
+) -> Vec<HistoricalTrade> {
+    let mut trades = Vec::new();
+    let mut open: Option<(usize, f64)> = None;
+    for i in 0..candles.len() {
+        let bar = &candles[i];
+        if let Some((entry_bar, entry)) = open {
+            let stop = entry * (1.0 - config.stop_loss_pct / 100.0);
+            let target = entry * (1.0 + config.target_pct / 100.0);
+            let outcome = if bar.low <= stop {
+                Some((stop, ExitReason::Stop))
+            } else if bar.high >= target {
+                Some((target, ExitReason::Target))
+            } else if i.saturating_sub(entry_bar) >= config.max_holding_bars {
+                Some((bar.close, ExitReason::Time))
+            } else {
+                None
+            };
+            if let Some((exit, reason)) = outcome {
+                let gross = (exit - entry) / entry * 100.0;
+                let net = gross - 2.0 * (config.commission_pct + config.slippage_pct);
+                trades.push(HistoricalTrade {
+                    entry_bar,
+                    exit_bar: i,
+                    entry,
+                    exit,
+                    net_return_pct: net,
+                    reason,
+                });
+                open = None;
+            }
+        }
+        if open.is_none() && entries.get(i).copied().unwrap_or(false) {
+            let fill = match config.execution {
+                ExecutionModel::SignalClose => Some(bar.close),
+                ExecutionModel::NextBarOpen => candles.get(i + 1).map(|next| next.open),
+            };
+            if let Some(fill) = fill {
+                open = Some((i, fill));
+            }
+        }
+    }
+    if let Some((entry_bar, entry)) = open {
+        let i = candles.len().saturating_sub(1);
+        let exit = candles[i].close;
+        let gross = (exit - entry) / entry * 100.0;
+        trades.push(HistoricalTrade {
+            entry_bar,
+            exit_bar: i,
+            entry,
+            exit,
+            net_return_pct: gross - 2.0 * (config.commission_pct + config.slippage_pct),
+            reason: ExitReason::EndOfData,
+        });
+    }
+    trades
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
