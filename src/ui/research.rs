@@ -359,7 +359,6 @@ impl ResearchTab {
                             (
                                 list.name.clone(),
                                 list.instruments()
-                                    .iter()
                                     .filter(|item| item.instrument.source == DataSource::Local)
                                     .map(|item| ("Local".into(), item.instrument.api_symbol()))
                                     .collect(),
