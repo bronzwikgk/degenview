@@ -1,9 +1,11 @@
 //! Dedicated Research Runner tab.
 
+use crate::host::paper::PaperHost;
 use crate::lock::lock;
 use crate::model::research::{
-    ExecutionModel, HistoricalConfig, HistoricalTrade, UniverseMember,
-    close_above_previous_high_entries, merge_universes, simulate_long,
+    CampaignStatus, ExecutionModel, FrozenUniverse, HistoricalConfig, HistoricalTrade,
+    PaperCampaign, UniverseMember, close_above_previous_high_entries, merge_universes,
+    simulate_long,
 };
 use crate::model::{DataSource, Timeframe};
 use crate::service::{
@@ -15,6 +17,7 @@ use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const KEY: &str = "workspace";
 
@@ -25,13 +28,15 @@ enum Section {
     Strategy,
     HistoricalTest,
     Reports,
+    Campaigns,
 }
 impl Section {
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 5] = [
         Self::Universe,
         Self::Strategy,
         Self::HistoricalTest,
         Self::Reports,
+        Self::Campaigns,
     ];
     fn label(self) -> &'static str {
         match self {
@@ -39,6 +44,7 @@ impl Section {
             Self::Strategy => "Strategy",
             Self::HistoricalTest => "Historical Test",
             Self::Reports => "Reports",
+            Self::Campaigns => "Paper Campaigns",
         }
     }
 }
@@ -70,6 +76,8 @@ struct SavedResearch {
     slippage_pct: f64,
     #[serde(default)]
     reports: Vec<RunReport>,
+    #[serde(default)]
+    campaigns: Vec<PaperCampaign>,
 }
 const fn default_stop_loss() -> f64 {
     5.0
@@ -219,6 +227,7 @@ impl ResearchTab {
         ui: &mut egui::Ui,
         store: &SharedStore,
         watchlist: &Arc<Mutex<WatchlistStore>>,
+        paper: &Arc<Mutex<PaperHost>>,
     ) {
         if !self.loaded {
             self.loaded = true;
@@ -443,6 +452,77 @@ impl ResearchTab {
                     });
                 } else {
                     ui.label("No completed Research Runner runs yet.");
+                }
+            }
+            Section::Campaigns => {
+                let selected_account = lock(paper).snapshot().selected_account_id;
+                ui.label("Forward-only paper campaigns freeze their Universe Set at creation.");
+                match selected_account {
+                    Some(account_id) => {
+                        ui.label(format!("Paper account: {account_id}"));
+                        if ui.button("Create frozen paper campaign").clicked() {
+                            let names: Vec<String> = self
+                                .saved
+                                .universe_set
+                                .lines()
+                                .map(str::trim)
+                                .filter(|name| !name.is_empty())
+                                .map(str::to_owned)
+                                .collect();
+                            let sets: Vec<(String, Vec<(String, String)>)> = lock(watchlist)
+                                .lists()
+                                .iter()
+                                .filter(|list| names.iter().any(|name| name == &list.name))
+                                .map(|list| {
+                                    (
+                                        list.name.clone(),
+                                        list.instruments()
+                                            .filter(|item| {
+                                                item.instrument.source == DataSource::Local
+                                            })
+                                            .map(|item| {
+                                                ("Local".into(), item.instrument.api_symbol())
+                                            })
+                                            .collect(),
+                                    )
+                                })
+                                .collect();
+                            let as_of_ms = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .map_or(0, |duration| duration.as_millis() as i64);
+                            let universe = FrozenUniverse::from_sets(as_of_ms, sets);
+                            if universe.members.is_empty() {
+                                self.notice =
+                                    Some("Select a Local NSE Watchlist in Universe first.".into());
+                            } else {
+                                self.saved.campaigns.push(PaperCampaign {
+                                    id: format!("campaign-{as_of_ms}"),
+                                    strategy_version: if self.saved.strategy_name.is_empty() {
+                                        "Unnamed strategy".into()
+                                    } else {
+                                        self.saved.strategy_name.clone()
+                                    },
+                                    account_id,
+                                    universe,
+                                    status: CampaignStatus::Active,
+                                });
+                                self.notice =
+                                    Some("Frozen paper campaign created and will be saved.".into());
+                            }
+                        }
+                    }
+                    None => ui.label(
+                        "Create or select a Paper Trading account before starting a campaign.",
+                    ),
+                }
+                for campaign in &self.saved.campaigns {
+                    ui.label(format!(
+                        "{} · {:?} · {} members · account {}",
+                        campaign.strategy_version,
+                        campaign.status,
+                        campaign.universe.members.len(),
+                        campaign.account_id
+                    ));
                 }
             }
         };

@@ -204,7 +204,9 @@ pub(super) fn show_tab(
                 }));
             }
         }
-        TabContent::Research(research) => research.ui(ui, &env.store, &env.watchlist),
+        TabContent::Research(research) => {
+            research.ui(ui, &env.store, &env.watchlist, &env.paper_host)
+        }
     }
 }
 
