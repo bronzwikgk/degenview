@@ -1,5 +1,6 @@
 /target
 /target-*
+/dist/
 /packaging/flatpak/cargo-sources.json
 /.DS_Store
 *.profraw
