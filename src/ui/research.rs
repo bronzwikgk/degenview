@@ -1,8 +1,10 @@
 //! Dedicated Research Runner tab.
 
-use crate::store::SharedStore;
+use crate::lock::lock;
+use crate::store::{SharedStore, watchlist::WatchlistStore};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
 
 const KEY: &str = "workspace";
 
@@ -73,7 +75,12 @@ impl ResearchTab {
     pub fn title(&self) -> &str {
         "Research"
     }
-    pub fn ui(&mut self, ui: &mut egui::Ui, store: &SharedStore) {
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        store: &SharedStore,
+        watchlist: &Arc<Mutex<WatchlistStore>>,
+    ) {
         if !self.loaded {
             self.loaded = true;
             if let Ok(s) = store.lock() {
@@ -93,7 +100,28 @@ impl ResearchTab {
             Section::Universe => {
                 ui.label("Universe Set");
                 ui.text_edit_multiline(&mut self.saved.universe_set);
-                ui.small("Enter selected Watchlists or frozen screener snapshots. One line per source universe.");
+                ui.small("Selected Watchlists and frozen screener snapshots. One line per source universe.");
+                ui.separator();
+                ui.label("Add Watchlist to Universe Set");
+                let lists: Vec<String> = lock(watchlist)
+                    .lists()
+                    .iter()
+                    .map(|list| list.name.clone())
+                    .collect();
+                for name in lists {
+                    if ui.button(&name).clicked()
+                        && !self
+                            .saved
+                            .universe_set
+                            .lines()
+                            .any(|line| line.trim() == name)
+                    {
+                        if !self.saved.universe_set.is_empty() {
+                            self.saved.universe_set.push('\n');
+                        }
+                        self.saved.universe_set.push_str(&name);
+                    }
+                }
             }
             Section::Strategy => {
                 ui.label("Strategy name");

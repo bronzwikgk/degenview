@@ -203,7 +203,7 @@ pub(super) fn show_tab(
                 }));
             }
         }
-        TabContent::Research(research) => research.ui(ui, &env.store),
+        TabContent::Research(research) => research.ui(ui, &env.store, &env.watchlist),
     }
 }
 

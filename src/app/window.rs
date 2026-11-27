@@ -79,6 +79,7 @@ pub(super) struct WindowEnv {
     /// The shared quotes the tab strip reads its prices from.
     pub(super) quote_book: WatchlistQuoteBook,
     pub(super) store: crate::store::SharedStore,
+    pub(super) watchlist: std::sync::Arc<std::sync::Mutex<crate::store::watchlist::WatchlistStore>>,
 }
 
 /// One window: the tab strip, then the tab showing.
@@ -355,6 +356,7 @@ impl DegenViewApp {
             mcp_questions: self.mcp.questions().clone(),
             quote_book: self.quote_book.clone(),
             store: self.store.clone(),
+            watchlist: std::sync::Arc::clone(&self.watchlist),
         };
         for (window, placement) in self.tabs.windows().snapshot() {
             let (title, is_scripts) = env
