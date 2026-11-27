@@ -108,6 +108,7 @@ fn client(id: &str, name: &str, permissions: PermissionSet) -> McpClient {
         created_at_ms: 1_000,
         last_used_ms: Some(5_000),
         remote_allowed: false,
+        is_agent: false,
         allowed_cidrs: Vec::new(),
     }
 }

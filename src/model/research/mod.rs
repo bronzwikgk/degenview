@@ -32,13 +32,13 @@ pub fn merge_universes(
                 .find(|member| member.source == source && member.symbol == symbol)
             {
                 if !existing.universe_labels.contains(&label) {
-                    existing.universe_labels.push(label);
+                    existing.universe_labels.push(label.clone());
                 }
             } else {
                 members.push(UniverseMember {
                     source,
                     symbol,
-                    universe_labels: vec![label],
+                    universe_labels: vec![label.clone()],
                 });
             }
         }

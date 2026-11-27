@@ -1002,6 +1002,7 @@ mod tests {
             created_at_ms: 0,
             last_used_ms: None,
             remote_allowed: false,
+            is_agent: false,
             allowed_cidrs: Vec::new(),
         };
         let ceiling = default_remote_ceiling();
@@ -1136,6 +1137,7 @@ mod tests {
             created_at_ms: 1,
             last_used_ms: None,
             remote_allowed: remote,
+            is_agent: false,
             allowed_cidrs: Vec::new(),
         }
     }

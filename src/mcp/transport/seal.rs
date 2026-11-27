@@ -130,6 +130,7 @@ mod tests {
             created_at_ms: 5,
             last_used_ms: None,
             remote_allowed: false,
+            is_agent: false,
             allowed_cidrs: Vec::new(),
         }
     }
