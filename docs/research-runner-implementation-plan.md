@@ -19,7 +19,7 @@ empty/loading/error state from its host.
 
 | File | Responsibility | Phase |
 | --- | --- | --- |
-| `src/model/research/mod.rs` | Public pure domain module: identifiers, versioned strategy, universe snapshot, run configuration, lifecycle event and run status. | 1 |
+| `src/model/research/mod.rs` | Public pure domain module: identifiers, versioned strategy, universe snapshot, Universe Set, run configuration, lifecycle event and run status. | 1 |
 | `src/model/research/strategy.rs` | Context/Setup/Entry Signal → Trigger → Confirmation conditions, invalidation, stop, exit and execution settings. No I/O. | 1 |
 | `src/model/research/engine.rs` | Deterministic daily bar-by-bar historical state machine and fill model. Enforces as-of-bar access and same-bar stop/target policy. | 1 |
 | `src/model/research/report.rs` | Pure trade ledger, symbol diagnostics, aggregate metrics, equity curve and report calculations. | 1 |
@@ -29,10 +29,10 @@ empty/loading/error state from its host.
 | `src/host/research/historical.rs` | Starts/polls/cancels the historical run on a work-queue lane; converts OHLCV into pure engine input. | 3 |
 | `src/host/research/campaign.rs` | Forward-only campaign coordinator: frozen universe, strategy version, daily evaluation and hand-off to the existing Paper host. | 5 |
 | `src/ui/research/tab/mod.rs` | `ResearchTab` top-level view, internal section selection and common header. | 4 |
-| `src/ui/research/universe.rs` | Watchlist/screener/snapshot selection, query loading, query result preview and snapshot action. | 4 |
+| `src/ui/research/universe.rs` | Watchlist/screener/snapshot selection, Universe Set selection, query loading, preview and snapshot action. | 4 |
 | `src/ui/research/strategy_builder.rs` | Versioned builder for Context, Setup and Entry staged conditions plus invalidation/stop/exit/costs. | 4 |
 | `src/ui/research/historical_test.rs` | Historical-test configuration, run progress, cancellation, loading/empty/error states. | 4 |
-| `src/ui/research/reports.rs` | Summary, equity curve, trade ledger, signals, symbol analysis, parameters and diagnostics views. | 6 |
+| `src/ui/research/reports.rs` | Summary, equity curve, trade ledger, signals, symbol analysis, parameters and diagnostics views, partitioned per universe and combined. | 6 |
 | `src/ui/research/paper_campaigns.rs` | Create, monitor and stop forward paper campaigns. | 5 |
 
 ## Existing files to modify
@@ -85,7 +85,7 @@ ui::research
 
 | Phase | Required evidence |
 | --- | --- |
-| 1 | Pure unit tests prove no stage can skip Signal/Trigger/Confirmation and no pivot is available before confirmation. |
+| 1 | Pure unit tests prove no stage can skip Signal/Trigger/Confirmation, no pivot is available before confirmation, and overlapping Universe Set symbols run once but retain all membership labels. |
 | 2 | Store round-trip tests preserve strategy versions, universe snapshots, runs and diagnostics. |
 | 3 | Deterministic fixture tests verify expiry, invalidation, entry model, costs and no look-ahead. |
 | 4 | UI headless tests cover empty, loading, running, completed and error states; manual screenshot/interaction review. |

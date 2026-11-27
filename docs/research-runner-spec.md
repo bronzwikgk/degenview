@@ -35,6 +35,7 @@ Universe | Strategy | Historical Test | Paper Campaigns | Reports
 ### Sources
 
 - Existing Watchlist.
+- A named **Universe Set** containing two or more Watchlists and/or screener snapshots.
 - Saved Local NSE screener query.
 - New Local NSE screener query.
 - A previously saved universe snapshot.
@@ -48,6 +49,10 @@ Universe | Strategy | Historical Test | Paper Campaigns | Reports
   timeframe, creation time and, for historical work, the as-of date.
 - A historical run must evaluate membership using only data known at its as-of date. It must not
   use today's screener membership for an earlier test date.
+- A Universe Set retains source membership labels. Execution deduplicates identical
+  source-qualified symbols, while reports retain every source universe that included the symbol.
+- Results must provide a ledger and metrics per source universe as well as a clearly labelled
+  combined result.
 
 ## Strategy definition
 
@@ -120,6 +125,7 @@ available only on its confirmation bar, N bars after its pivot bar.
 ### Inputs
 
 - Universe or immutable universe snapshot.
+- A Universe Set, with one report partition for each member universe.
 - Strategy version.
 - Timeframe, initially daily only.
 - Start and end date.
@@ -143,6 +149,23 @@ For every symbol and each bar at date `T`:
 
 The simulator must define and report its same-bar ordering rule when target and stop are both
 touched. It must not fill at a price not reachable from the chosen OHLC model.
+
+## Research tab workflow
+
+The Research tab is the single place to define and run research:
+
+```text
+Universe / Universe Set
+        ↓
+Strategy Builder
+        ↓
+Historical Test controls
+        ↓
+Reports: Summary | Equity Curve | Trades | Signals | Symbols | Parameters | Diagnostics
+```
+
+Creating a strategy, selecting one or more universes, starting a run and inspecting its results
+must not require leaving the Research tab.
 
 ### Required states
 

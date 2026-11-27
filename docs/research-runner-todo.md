@@ -9,6 +9,8 @@ Implementation map: `docs/research-runner-implementation-plan.md`.
 - [ ] Keep **Projects** as the development tracker route.
 - [ ] Reuse Local NSE screener query builder and saved-query storage in the Universe section.
 - [ ] Add Watchlist, saved query, new query and immutable universe snapshot sources.
+- [ ] Add Universe Sets: select multiple Watchlists and/or screener snapshots in one run.
+- [ ] Deduplicate identical source-qualified symbols for execution while retaining every universe-membership label in reports.
 - [ ] Save historical universe membership with its as-of date.
 - [ ] Add versioned strategy definitions with Context, Setup, Entry, Invalidation, Stop, Exit and Costs blocks.
 - [ ] Give Context, Setup and Entry separate Signal, Trigger and Confirmation conditions.
@@ -22,9 +24,11 @@ Implementation map: `docs/research-runner-implementation-plan.md`.
 - [ ] Add candidate lifecycle: Candidate, Cancelled, Expired, Entered, Target, Stopped, Timed Out and Open.
 - [ ] Store auditable historical run results and diagnostics; do not suppress data/rule errors.
 - [ ] Add report views: Summary, Equity Curve, Trades, Signals, Symbols, Parameters and Diagnostics.
+- [ ] Show separate reports per source universe and a clearly labelled combined report for a Universe Set.
 - [ ] Add forward-only Paper Campaigns from frozen Watchlist/screener snapshots.
 - [ ] Reuse the existing paper engine for forward orders, brackets, commissions, slippage and ledger records.
 - [ ] Verify the historical runner never sends replay or live quotes to the historical fill model.
+- [ ] Test the same strategy on two overlapping universe snapshots and verify independent ledgers, labels and combined totals.
 
 ## Existing components to reuse
 
