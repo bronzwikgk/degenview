@@ -66,6 +66,7 @@ fn plant_client(store: &SharedStore, token: &str) {
         created_at_ms: 1,
         last_used_ms: None,
         remote_allowed: false,
+        is_agent: false,
         allowed_cidrs: Vec::new(),
     });
     store.replace_mcp_clients(&clients).unwrap();

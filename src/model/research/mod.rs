@@ -312,4 +312,39 @@ mod tests {
         }
         assert_eq!(flow.status, CandidateStatus::Entered);
     }
+
+    fn candle(open: f64, high: f64, low: f64, close: f64) -> Kline {
+        Kline {
+            open_time: 0,
+            close_time: 0,
+            open,
+            high,
+            low,
+            close,
+            volume: 1.0,
+        }
+    }
+    #[test]
+    fn simulator_waits_for_next_open_and_charges_round_trip_costs() {
+        let candles = [
+            candle(10.0, 10.0, 10.0, 10.0),
+            candle(11.0, 12.5, 10.5, 12.0),
+        ];
+        let trades = simulate_long(
+            &candles,
+            &[true, false],
+            HistoricalConfig {
+                execution: ExecutionModel::NextBarOpen,
+                stop_loss_pct: 5.0,
+                target_pct: 10.0,
+                max_holding_bars: 5,
+                commission_pct: 0.1,
+                slippage_pct: 0.1,
+            },
+        );
+        assert_eq!(trades.len(), 1);
+        assert_eq!(trades[0].entry, 11.0);
+        assert_eq!(trades[0].reason, ExitReason::EndOfData);
+        assert!((trades[0].net_return_pct - 8.6909).abs() < 0.01);
+    }
 }

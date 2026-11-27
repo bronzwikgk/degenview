@@ -894,6 +894,7 @@ mod tests {
                 created_at_ms: 0,
                 last_used_ms: None,
                 remote_allowed: remote,
+                is_agent: false,
                 allowed_cidrs: Vec::new(),
             }],
             crate::model::mcp::PermissionSet::everything(),
