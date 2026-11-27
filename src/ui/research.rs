@@ -57,8 +57,10 @@ struct SavedResearch {
     start: String,
     end: String,
     execution: String,
+    #[serde(default)]
+    reports: Vec<RunReport>,
 }
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Deserialize, Serialize)]
 struct RunReport {
     scanned: usize,
     skipped: usize,
@@ -145,6 +147,7 @@ impl ResearchTab {
             if let Ok(s) = store.lock() {
                 if let Some(v) = s.research_get(KEY) {
                     self.saved = v;
+                    self.report = self.saved.reports.last().cloned();
                 }
             }
         }
@@ -157,6 +160,7 @@ impl ResearchTab {
         ui.separator();
         if let Some(run) = &mut self.run {
             if let Some(report) = run.poll() {
+                self.saved.reports.push(report.clone());
                 self.report = Some(report);
             }
             if !run.is_pending() {
