@@ -75,6 +75,7 @@ pub use pine::PineRunView;
 #[derive(Clone, Debug, PartialEq)]
 pub enum WorkspaceAction {
     OpenPortfolio,
+    OpenResearch,
     /// Open the Pine Studio tab.
     OpenPineScripts,
     /// Open the Pine Studio on the source of a Pine logs message.
@@ -190,6 +191,7 @@ pub struct ChartWorkspace {
     /// The watchlist sidebar and what it asks of the tab.
     watchlist_pane: WatchlistPane,
     projects_pane: ProjectsPane,
+    open_research_requested: bool,
     /// The market-flow panel: shown or not, its mode and filters. A tab starts without it.
     market_flow: market_flow::MarketFlowPane,
     /// The order sheet and the orders panel, and the venue they trade on.
@@ -322,6 +324,7 @@ impl ChartWorkspace {
             quote_coordinator,
             watchlist_pane: WatchlistPane::default(),
             projects_pane: ProjectsPane::default(),
+            open_research_requested: false,
             market_flow: market_flow::MarketFlowPane::default(),
             trade: TradeSide::default(),
             context: ContextState::default(),
@@ -696,6 +699,9 @@ impl ChartWorkspace {
             .show(ui, |ui| self.render_grid(ui, &mut lock(paper), window));
         if let Some(item) = self.watchlist_pane.take_new_tab_request() {
             actions.push(WorkspaceAction::OpenWatchlistInNewTab(item));
+        }
+        if std::mem::take(&mut self.open_research_requested) {
+            actions.push(WorkspaceAction::OpenResearch);
         }
         if std::mem::take(&mut self.snapshot.settings_requested) {
             actions.push(WorkspaceAction::OpenSnapshotSettings);

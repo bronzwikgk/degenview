@@ -65,6 +65,7 @@ enum AppAction {
         proceed: bool,
     },
     OpenPortfolio,
+    OpenResearch,
     OpenPine,
     /// Open the Pine Studio on the source of a Pine logs message.
     OpenPineSource(crate::model::pine::logs_view::SourceTarget),

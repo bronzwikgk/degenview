@@ -114,6 +114,7 @@ pub(super) fn show_tab(
             {
                 pending.extend(actions.into_iter().map(|action| match action {
                     WorkspaceAction::OpenPortfolio => AppAction::OpenPortfolio,
+                    WorkspaceAction::OpenResearch => AppAction::OpenResearch,
                     WorkspaceAction::OpenPineScripts => AppAction::OpenPine,
                     WorkspaceAction::OpenPineSource(target) => AppAction::OpenPineSource(target),
                     WorkspaceAction::OpenAlerts => AppAction::OpenAlerts,

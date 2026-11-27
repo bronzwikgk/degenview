@@ -117,6 +117,7 @@ impl DegenViewApp {
                     }
                 }
                 AppAction::OpenPortfolio => self.open_portfolio(ctx),
+                AppAction::OpenResearch => self.open_research(ctx),
                 AppAction::OpenPine => self.open_pine(ctx),
                 AppAction::OpenPineSource(target) => self.open_pine_source(ctx, &target),
                 AppAction::OpenAlpacaSettings => {
