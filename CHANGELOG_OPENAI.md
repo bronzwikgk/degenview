@@ -82,3 +82,21 @@ All changes made by AI agents will be recorded here with timestamps, reasons, an
 - **Why**: Enable support for mstock brokerage platform, extending the existing broker infrastructure to support additional trading venues
 - **Location**: `src/host/broker/mod.rs`: Added `mstock` broker type enumeration and connection handling; `src/service/keychain/broker_secrets.rs`: Added mstock credential storage; `src/app/mod.rs`: BrokerHost initialization with mstock support; `src/workplace/trade/broker.rs`: mstock order placement logic
 --
+
+## Entry 10 - Projects Tracker and New Tab Navigation
+- **Timestamp**: 2026-11-27 15:42
+- **Change**: Added a local-first Projects tracker with seeded DegenView V1 and Algo Trading Price Action projects. Moved Screener and Projects discovery from Watchlist-adjacent toolbar controls to the New Tab launcher, ordered as Recent, Screener, Projects and Layouts.
+- **Why**: Keep research and project workflows discoverable without crowding the chart toolbar or Watchlist.
+- **Location**:
+  - `src/workspace/projects.rs`: Local project/task data model and tracker UI.
+  - `src/workspace/mod.rs`, `src/workspace/toolbar.rs`: Workspace integration.
+  - `src/ui/workspace/empty_state/mod.rs`, `src/ui/workspace/empty_state/tabs.rs`, `src/workspace/empty_page/mod.rs`: New Tab launcher routes.
+  - `src/ui/workspace/toolbar.rs`: Removed the separate Screener and Projects toolbar buttons.
+
+## Entry 11 - Research Runner Design Specification
+- **Timestamp**: 2026-11-27 18:16
+- **Change**: Defined the planned Research Runner tab, its Watchlist/screener universe sources, strategy lifecycle, historical-test and paper-campaign requirements, reports, and implementation to-do. Added Signal → Trigger → Confirmation stages for Context, Setup and Entry.
+- **Why**: Establish an auditable, no-look-ahead framework before implementing multi-symbol historical testing and forward paper campaigns.
+- **Location**:
+  - `docs/research-runner-spec.md`
+  - `docs/research-runner-todo.md`
