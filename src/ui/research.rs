@@ -296,7 +296,7 @@ impl ResearchTab {
                         };
                         self.report = None;
                         self.run = Some(
-                            work_queue::SCREENER
+                            work_queue::RESEARCH
                                 .start(Some(ui.ctx()), move || run_local(members, execution)),
                         );
                     }

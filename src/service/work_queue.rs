@@ -231,6 +231,10 @@ pub static UPDATES: WorkQueue = WorkQueue::new(1);
 /// delays market update work or chart requests.
 pub static SCREENER: WorkQueue = WorkQueue::new(1);
 
+/// Historical research runs get an isolated worker. A broad universe scan can take minutes and
+/// must neither delay an interactive screener query nor share workers with chart data requests.
+pub static RESEARCH: WorkQueue = WorkQueue::new(1);
+
 /// Chart snapshots, file dialogs and tests that read a saved key wait on things that take as long
 /// as the user or the network does (a save panel, a Keychain prompt, an upload), so they never
 /// borrow a general worker.
