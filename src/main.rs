@@ -3,7 +3,9 @@
 
 fn main() {
     // Before anything else: a panic in a build with no console is otherwise invisible.
-    degenview_gk::install_panic_hook(|message| show_error("DegenView stopped unexpectedly", message));
+    degenview_gk::install_panic_hook(|message| {
+        show_error("DegenView stopped unexpectedly", message)
+    });
     if let Err(error) = degenview_gk::run_gui_with(icloud()) {
         degenview_gk::note_startup(&format!("failed: {error}"));
         show_error("DegenView failed to start", &error.to_string());

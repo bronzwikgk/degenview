@@ -7,6 +7,7 @@ use crate::model::InstrumentId;
 use crate::model::alert::AlertAsset;
 use crate::model::watchlist::text::ImportReport;
 use crate::model::watchlist::{EntryId, WatchlistError, WatchlistInstrument, WatchlistNotice};
+use crate::model::{DataSource, Timeframe};
 use crate::service::market::trend;
 use crate::service::system::file_dialog;
 use crate::service::work_queue::{self, Pending};
@@ -15,6 +16,110 @@ use crate::ui::watchlist::sidebar::{
 };
 use eframe::egui;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+const SCREENER_QUERIES_KEY: &str = "screener.local_nse.queries";
+const TURNOVER_TEMPLATE_NAME: &str = "Turnover: 3M + Current + 6W";
+const TURNOVER_TEMPLATE: &str = "month_turnover(0) > 200000000 AND month_turnover(1) > 100000000 AND month_turnover(2) > 100000000 AND month_turnover(3) > 100000000 AND avg_week_turnover(6) > 50000000";
+
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
+struct SavedScreenerQuery {
+    name: String,
+    text: String,
+}
+
+#[derive(Clone, Debug, Default)]
+struct ScanReport {
+    matches: Vec<ScanMatch>,
+    scanned: usize,
+    skipped: usize,
+    cancelled: bool,
+    error: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct ScanMatch {
+    symbol: String,
+    close: f64,
+    return_5: Option<f64>,
+    rsi_14: Option<f64>,
+    volume: f64,
+}
+
+#[derive(Clone, Copy, Default, PartialEq)]
+enum ScreenerSort {
+    #[default]
+    Symbol,
+    Close,
+    Return5,
+    Rsi14,
+    Volume,
+}
+
+#[derive(Default)]
+struct ScanProgress {
+    scanned: AtomicUsize,
+    total: AtomicUsize,
+    cancelled: AtomicBool,
+}
+
+fn scan_local_nse(query: String, progress: Arc<ScanProgress>) -> ScanReport {
+    let expression = match crate::model::screener::parse(&query) {
+        Ok(value) => value,
+        Err(error) => {
+            return ScanReport {
+                error: Some(error.to_string()),
+                ..Default::default()
+            };
+        }
+    };
+    let symbols = match crate::service::market::local_csv::symbols() {
+        Ok(value) => value,
+        Err(error) => {
+            return ScanReport {
+                error: Some(error.to_string()),
+                ..Default::default()
+            };
+        }
+    };
+    progress.total.store(symbols.len(), Ordering::Relaxed);
+    let bars_needed = crate::model::screener::required_bars(&expression).max(2) as u32;
+    let mut report = ScanReport::default();
+    for symbol in symbols {
+        if progress.cancelled.load(Ordering::Relaxed) {
+            report.cancelled = true;
+            break;
+        }
+        match crate::service::fetch_klines(
+            DataSource::Local,
+            &symbol,
+            Timeframe::DAY_1,
+            bars_needed,
+        ) {
+            Ok(bars) if crate::model::screener::matches(&expression, &bars) => {
+                report.scanned += 1;
+                let last = bars.last().expect("matched candles have a latest bar");
+                report.matches.push(ScanMatch {
+                    symbol,
+                    close: last.close,
+                    return_5: crate::model::screener::value(
+                        &crate::model::screener::Field::Return(5),
+                        &bars,
+                    ),
+                    rsi_14: crate::model::screener::value(
+                        &crate::model::screener::Field::Rsi(14),
+                        &bars,
+                    ),
+                    volume: last.volume,
+                });
+            }
+            Ok(_) => report.scanned += 1,
+            Err(_) => report.skipped += 1,
+        }
+        progress.scanned.fetch_add(1, Ordering::Relaxed);
+    }
+    report
+}
 
 /// Shows why a change was refused. A failed save already shows the store's own message.
 fn report_watchlist(slot: &mut Option<WatchlistNotice>, result: Result<(), WatchlistError>) {
@@ -68,6 +173,20 @@ pub(super) struct WatchlistPane {
     picker_target: Option<EntryId>,
     /// A row asked to open in a new tab; the app opens it after the frame.
     open_in_new_tab: Option<WatchlistInstrument>,
+    screener_visible: bool,
+    screener_query: String,
+    screener_name: String,
+    saved_screens: Vec<SavedScreenerQuery>,
+    screens_loaded: bool,
+    scan: Option<Pending<ScanReport>>,
+    scan_progress: Option<Arc<ScanProgress>>,
+    scan_report: Option<ScanReport>,
+    screener_notice: Option<String>,
+    screener_sort: ScreenerSort,
+    screener_descending: bool,
+    builder_field: usize,
+    builder_operator: usize,
+    builder_right: String,
 }
 
 impl WatchlistPane {
@@ -135,6 +254,11 @@ impl ChartWorkspace {
     }
 
     fn show_watchlist(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        self.load_screener_queries();
+        if self.watchlist_pane.screener_visible {
+            self.show_screener(ui, ctx);
+            return;
+        }
         if let Some(export) = &mut self.watchlist_pane.file_result {
             if let Some(Err(error)) = export.poll() {
                 self.watchlist_pane.notice = Some(WatchlistNotice::new("File Error", error));
@@ -187,6 +311,328 @@ impl ChartWorkspace {
         self.apply_watchlist_actions(actions, ctx);
     }
 
+    fn load_screener_queries(&mut self) {
+        if self.watchlist_pane.screens_loaded {
+            return;
+        }
+        self.watchlist_pane.screens_loaded = true;
+        self.watchlist_pane.saved_screens = lock(&self.store)
+            .setting(SCREENER_QUERIES_KEY)
+            .unwrap_or_default();
+        if !self
+            .watchlist_pane
+            .saved_screens
+            .iter()
+            .any(|query| query.name == TURNOVER_TEMPLATE_NAME)
+        {
+            self.watchlist_pane.saved_screens.push(SavedScreenerQuery {
+                name: TURNOVER_TEMPLATE_NAME.to_owned(),
+                text: TURNOVER_TEMPLATE.to_owned(),
+            });
+            self.persist_screener_queries();
+        }
+    }
+
+    fn persist_screener_queries(&mut self) {
+        if let Err(error) =
+            lock(&self.store).set_setting(SCREENER_QUERIES_KEY, &self.watchlist_pane.saved_screens)
+        {
+            self.watchlist_pane.screener_notice = Some(format!("Could not save query: {error}"));
+        }
+    }
+
+    fn show_screener(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if let Some(job) = &mut self.watchlist_pane.scan {
+            if let Some(report) = job.poll() {
+                self.watchlist_pane.scan_report = Some(report);
+            }
+            if !job.is_pending() {
+                self.watchlist_pane.scan = None;
+                self.watchlist_pane.scan_progress = None;
+            }
+        }
+        ui.horizontal(|ui| {
+            if ui.button("‹ Watchlists").clicked() {
+                self.watchlist_pane.screener_visible = false;
+            }
+            ui.heading("Local NSE Screener");
+        });
+        ui.separator();
+        ui.label("Condition (daily local data)");
+        ui.add(
+            egui::TextEdit::multiline(&mut self.watchlist_pane.screener_query)
+                .hint_text("close > ema(20) AND rsi(14) > 50 AND return(5) >= 3")
+                .desired_rows(3),
+        );
+        ui.small("Fields: open, high, low, close, volume, return(n), sma(n), ema(n), rsi(n). Join conditions with AND.");
+        const FIELDS: [&str; 11] = [
+            "close",
+            "open",
+            "high",
+            "low",
+            "volume",
+            "return(5)",
+            "sma(20)",
+            "ema(20)",
+            "rsi(14)",
+            "month_turnover(0)",
+            "avg_week_turnover(6)",
+        ];
+        const OPERATORS: [&str; 5] = [">", ">=", "<", "<=", "="];
+        ui.horizontal(|ui| {
+            ui.label("Add condition");
+            egui::ComboBox::from_id_salt("screener-builder-field")
+                .selected_text(FIELDS[self.watchlist_pane.builder_field])
+                .show_ui(ui, |ui| {
+                    for (index, field) in FIELDS.iter().enumerate() {
+                        ui.selectable_value(&mut self.watchlist_pane.builder_field, index, *field);
+                    }
+                });
+            egui::ComboBox::from_id_salt("screener-builder-operator")
+                .selected_text(OPERATORS[self.watchlist_pane.builder_operator])
+                .show_ui(ui, |ui| {
+                    for (index, operator) in OPERATORS.iter().enumerate() {
+                        ui.selectable_value(
+                            &mut self.watchlist_pane.builder_operator,
+                            index,
+                            *operator,
+                        );
+                    }
+                });
+            ui.add(
+                egui::TextEdit::singleline(&mut self.watchlist_pane.builder_right)
+                    .hint_text("50 or ema(20)"),
+            );
+            if ui.button("Add").clicked() {
+                let right = self.watchlist_pane.builder_right.trim();
+                if right.is_empty() {
+                    self.watchlist_pane.screener_notice =
+                        Some("Enter a numeric value or another field.".to_owned());
+                } else {
+                    let clause = format!(
+                        "{} {} {}",
+                        FIELDS[self.watchlist_pane.builder_field],
+                        OPERATORS[self.watchlist_pane.builder_operator],
+                        right
+                    );
+                    if self.watchlist_pane.screener_query.trim().is_empty() {
+                        self.watchlist_pane.screener_query = clause;
+                    } else {
+                        self.watchlist_pane.screener_query.push_str(" AND ");
+                        self.watchlist_pane.screener_query.push_str(&clause);
+                    }
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    self.watchlist_pane.scan.is_none(),
+                    egui::Button::new("Run Local NSE scan"),
+                )
+                .clicked()
+            {
+                let query = self.watchlist_pane.screener_query.clone();
+                self.watchlist_pane.screener_notice = None;
+                self.watchlist_pane.scan_report = None;
+                let progress = Arc::new(ScanProgress::default());
+                let worker_progress = progress.clone();
+                self.watchlist_pane.scan_progress = Some(progress);
+                self.watchlist_pane.scan = Some(
+                    work_queue::SCREENER
+                        .start(Some(ctx), move || scan_local_nse(query, worker_progress)),
+                );
+            }
+            if let Some(progress) = &self.watchlist_pane.scan_progress {
+                ui.spinner();
+                ui.label(format!(
+                    "Scanning {} / {} local symbols…",
+                    progress.scanned.load(Ordering::Relaxed),
+                    progress.total.load(Ordering::Relaxed)
+                ));
+                if ui.button("Cancel").clicked() {
+                    progress.cancelled.store(true, Ordering::Relaxed);
+                }
+            }
+        });
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.label("Save as");
+            ui.text_edit_singleline(&mut self.watchlist_pane.screener_name);
+            if ui.button("Save query").clicked() {
+                let name = self.watchlist_pane.screener_name.trim().to_owned();
+                let text = self.watchlist_pane.screener_query.trim().to_owned();
+                if name.is_empty() || text.is_empty() {
+                    self.watchlist_pane.screener_notice =
+                        Some("Enter both a query name and a condition.".to_owned());
+                } else {
+                    self.watchlist_pane
+                        .saved_screens
+                        .retain(|saved| saved.name != name);
+                    self.watchlist_pane
+                        .saved_screens
+                        .push(SavedScreenerQuery { name, text });
+                    self.persist_screener_queries();
+                }
+            }
+        });
+        let mut load = None;
+        let mut remove = None;
+        for (index, saved) in self.watchlist_pane.saved_screens.iter().enumerate() {
+            ui.horizontal(|ui| {
+                if ui.button(&saved.name).clicked() {
+                    load = Some(index);
+                }
+                ui.small(&saved.text);
+                if ui
+                    .small_button("×")
+                    .on_hover_text("Delete saved query")
+                    .clicked()
+                {
+                    remove = Some(index);
+                }
+            });
+        }
+        if let Some(index) = load {
+            let saved = self.watchlist_pane.saved_screens[index].clone();
+            self.watchlist_pane.screener_name = saved.name;
+            self.watchlist_pane.screener_query = saved.text;
+        }
+        if let Some(index) = remove {
+            self.watchlist_pane.saved_screens.remove(index);
+            self.persist_screener_queries();
+        }
+        if let Some(message) = &self.watchlist_pane.screener_notice {
+            ui.colored_label(egui::Color32::LIGHT_RED, message);
+        }
+        if let Some(report) = &self.watchlist_pane.scan_report {
+            if let Some(error) = &report.error {
+                ui.colored_label(egui::Color32::LIGHT_RED, error);
+                return;
+            }
+            ui.label(format!(
+                "{} matches · {} scanned · {} unreadable{}",
+                report.matches.len(),
+                report.scanned,
+                report.skipped,
+                if report.cancelled {
+                    " · cancelled"
+                } else {
+                    ""
+                }
+            ));
+            let mut rows = report.matches.clone();
+            let sort = self.watchlist_pane.screener_sort;
+            rows.sort_by(|a, b| match sort {
+                ScreenerSort::Symbol => a.symbol.cmp(&b.symbol),
+                ScreenerSort::Close => a.close.total_cmp(&b.close),
+                ScreenerSort::Return5 => a
+                    .return_5
+                    .unwrap_or(f64::NEG_INFINITY)
+                    .total_cmp(&b.return_5.unwrap_or(f64::NEG_INFINITY)),
+                ScreenerSort::Rsi14 => a
+                    .rsi_14
+                    .unwrap_or(f64::NEG_INFINITY)
+                    .total_cmp(&b.rsi_14.unwrap_or(f64::NEG_INFINITY)),
+                ScreenerSort::Volume => a.volume.total_cmp(&b.volume),
+            });
+            if self.watchlist_pane.screener_descending {
+                rows.reverse();
+            }
+            ui.horizontal(|ui| {
+                for (title, column) in [
+                    ("Symbol", ScreenerSort::Symbol),
+                    ("Close", ScreenerSort::Close),
+                    ("5D %", ScreenerSort::Return5),
+                    ("RSI 14", ScreenerSort::Rsi14),
+                    ("Volume", ScreenerSort::Volume),
+                ] {
+                    if ui.small_button(title).clicked() {
+                        if self.watchlist_pane.screener_sort == column {
+                            self.watchlist_pane.screener_descending =
+                                !self.watchlist_pane.screener_descending;
+                        } else {
+                            self.watchlist_pane.screener_sort = column;
+                            self.watchlist_pane.screener_descending =
+                                column != ScreenerSort::Symbol;
+                        }
+                    }
+                }
+            });
+            egui::ScrollArea::vertical()
+                .max_height(250.0)
+                .show(ui, |ui| {
+                    egui::Grid::new("local-nse-screen-results")
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for row in &rows {
+                                ui.label(&row.symbol);
+                                ui.label(format!("{:.2}", row.close));
+                                ui.label(
+                                    row.return_5
+                                        .map_or("—".to_owned(), |value| format!("{value:.2}%")),
+                                );
+                                ui.label(
+                                    row.rsi_14
+                                        .map_or("—".to_owned(), |value| format!("{value:.1}")),
+                                );
+                                ui.label(format!("{:.0}", row.volume));
+                                ui.end_row();
+                            }
+                        });
+                });
+            if ui.button("Save matches as Watchlist").clicked() {
+                self.save_screen_matches(
+                    report
+                        .matches
+                        .iter()
+                        .map(|row| row.symbol.clone())
+                        .collect(),
+                );
+            }
+        }
+    }
+
+    fn save_screen_matches(&mut self, symbols: Vec<String>) {
+        let name = if self.watchlist_pane.screener_name.trim().is_empty() {
+            "Screener matches".to_owned()
+        } else {
+            self.watchlist_pane.screener_name.trim().to_owned()
+        };
+        let mut store = lock(&self.watchlist);
+        match store.create_list(&name, None) {
+            Ok(id) => {
+                let changes = crate::store::watchlist::ListChanges {
+                    add: symbols
+                        .into_iter()
+                        .map(|symbol| {
+                            (
+                                WatchlistInstrument::from_market(
+                                    DataSource::Local,
+                                    &symbol,
+                                    &symbol,
+                                ),
+                                crate::store::watchlist::Place::End,
+                            )
+                        })
+                        .collect(),
+                    ..Default::default()
+                };
+                if let Err(error) = store.edit_list(id, changes) {
+                    // The list was just created by this operation; do not leave an empty
+                    // artifact when the bulk add is refused (for example, a full list).
+                    let _ = store.delete_list(id);
+                    self.watchlist_pane.screener_notice = Some(error.to_string());
+                } else {
+                    self.watchlist_pane.screener_notice =
+                        Some(format!("Saved {name} as a normal watchlist."));
+                    self.watchlist_pane.screener_visible = false;
+                }
+            }
+            Err(error) => self.watchlist_pane.screener_notice = Some(error.to_string()),
+        }
+    }
+
     /// Closing the sidebar stops its quote demand at once; a background tab or a covered
     /// window never reaches here and is covered by the demand's lease.
     pub(super) fn suspend_watchlist_demand(&self) {
@@ -200,6 +646,7 @@ impl ChartWorkspace {
             let mut store = lock(&self.watchlist);
             for action in actions {
                 match action {
+                    WatchlistAction::OpenScreener => self.watchlist_pane.screener_visible = true,
                     WatchlistAction::Open(item) => opens.push((true, item)),
                     WatchlistAction::AddChart(item) => opens.push((false, item)),
                     WatchlistAction::OpenInNewTab(item) => {

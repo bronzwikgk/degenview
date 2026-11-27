@@ -28,10 +28,11 @@ pub(super) fn header(
     );
     let filter_rect = options_rect.translate(Vec2::new(-32.0, 0.0));
     let add_rect = filter_rect.translate(Vec2::new(-32.0, 0.0));
+    let screener_rect = add_rect.translate(Vec2::new(-32.0, 0.0));
     let selector_rect = Rect::from_min_max(
         Pos2::new(rect.left() + LEADING_INSET, rect.center().y - 13.0),
         Pos2::new(
-            (add_rect.left() - 8.0).max(rect.left() + LEADING_INSET + 64.0),
+            (screener_rect.left() - 8.0).max(rect.left() + LEADING_INSET + 64.0),
             rect.center().y + 13.0,
         ),
     );
@@ -80,6 +81,21 @@ pub(super) fn header(
         } else {
             state.clear_filter();
         }
+    }
+    let screener = ui.interact(screener_rect, Id::new("watchlist-screener"), Sense::click());
+    if screener.hovered() {
+        ui.painter()
+            .rect_filled(screener_rect, 6.0, Color32::from_white_alpha(17));
+    }
+    ui.painter().text(
+        screener_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "S",
+        egui::FontId::proportional(12.0),
+        theme::text_primary(),
+    );
+    if screener.on_hover_text("Open Local NSE Screener").clicked() {
+        actions.push(WatchlistAction::OpenScreener);
     }
     options_menu(ui, state, list, actions, options_rect, enabled);
 }

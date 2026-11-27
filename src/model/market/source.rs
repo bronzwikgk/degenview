@@ -122,9 +122,17 @@ impl DataSource {
     /// OHLC endpoint has no volume column, and the line charts report none at all.
     pub fn provides_volume(self) -> bool {
         match self {
-            Self::Binance | Self::Coinbase | Self::Okx | Self::Kraken
-            | Self::Bybit | Self::Gate | Self::Mexc | Self::DexScreener
-            | Self::Alpaca | Self::Yahoo | Self::Local => true,
+            Self::Binance
+            | Self::Coinbase
+            | Self::Okx
+            | Self::Kraken
+            | Self::Bybit
+            | Self::Gate
+            | Self::Mexc
+            | Self::DexScreener
+            | Self::Alpaca
+            | Self::Yahoo
+            | Self::Local => true,
             _ => false,
         }
     }
@@ -157,7 +165,7 @@ impl DataSource {
             | Self::Alpaca => raw.to_uppercase(),
             Self::CoinMarketCap => super::cmc::title(raw).to_owned(),
             Self::Local => raw.to_uppercase(),
-            Self::Yahoo => raw.to_owned(),  // Yahoo symbols like "RELIANCE.NS" passed through
+            Self::Yahoo => raw.to_owned(), // Yahoo symbols like "RELIANCE.NS" passed through
             _ => raw.to_owned(),
         }
     }

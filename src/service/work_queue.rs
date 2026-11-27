@@ -227,6 +227,10 @@ pub static LINKS: WorkQueue = WorkQueue::new(1);
 /// minutes and must never hold one of the general workers that fetch candles and alert quotes.
 pub static UPDATES: WorkQueue = WorkQueue::new(1);
 
+/// Long-running local screens get an isolated lane, so scanning thousands of CSV histories never
+/// delays market update work or chart requests.
+pub static SCREENER: WorkQueue = WorkQueue::new(1);
+
 /// Chart snapshots, file dialogs and tests that read a saved key wait on things that take as long
 /// as the user or the network does (a save panel, a Keychain prompt, an upload), so they never
 /// borrow a general worker.

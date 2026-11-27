@@ -460,23 +460,34 @@ impl ChartCard {
                 continue;
             };
             // Use the x_axis_format from appearance to determine label format
-            let label = match appearance.x_axis_format() {
+            let (label, is_short_date) = match appearance.x_axis_format() {
                 // Default: use existing timestamp format
                 crate::model::chart::appearance::XAxisFormat::Default
-                    if self.timeframe.is_some_and(|timeframe| !timeframe.is_intraday()) =>
+                    if self
+                        .timeframe
+                        .is_some_and(|timeframe| !timeframe.is_intraday()) =>
                 {
-                    format::short_date(candle.open_time)
+                    (format::short_date(candle.open_time), true)
                 }
-                crate::model::chart::appearance::XAxisFormat::Default => format::timestamp(candle.open_time),
+                crate::model::chart::appearance::XAxisFormat::Default => {
+                    (format::timestamp(candle.open_time), false)
+                }
                 // Custom formats would be handled here; for now default
-                _ => format::timestamp(candle.open_time),
+                _ => (format::timestamp(candle.open_time), false),
             };
             let x = x_for(*index);
             // A label that would hang over the plot's right edge waits for the chart to move, as a
             // price label does at the plot's top and bottom: it would run into the price axis and
             // the scale button in the corner. So does one cut by the left edge.
-            let galley =
-                painter.layout_no_wrap(label[5..].to_owned(), style.time_font(), style.text_color);
+            let galley = painter.layout_no_wrap(
+                if is_short_date {
+                    label
+                } else {
+                    label[5..].to_owned()
+                },
+                style.time_font(),
+                style.text_color,
+            );
             let half = galley.size().x / 2.0;
             if x + half > plot_right || x - half < rect.left() {
                 continue;

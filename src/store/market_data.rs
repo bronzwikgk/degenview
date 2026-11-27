@@ -19,11 +19,23 @@ impl Store {
         )?;
         let mut bars: Vec<Kline> = statement
             .query_map(
-                params![source.watchlist_slug(), symbol, timeframe.label(), limit as i64],
-                |row| Ok(Kline {
-                    open_time: row.get(0)?, close_time: row.get(1)?, open: row.get(2)?,
-                    high: row.get(3)?, low: row.get(4)?, close: row.get(5)?, volume: row.get(6)?,
-                }),
+                params![
+                    source.watchlist_slug(),
+                    symbol,
+                    timeframe.label(),
+                    limit as i64
+                ],
+                |row| {
+                    Ok(Kline {
+                        open_time: row.get(0)?,
+                        close_time: row.get(1)?,
+                        open: row.get(2)?,
+                        high: row.get(3)?,
+                        low: row.get(4)?,
+                        close: row.get(5)?,
+                        volume: row.get(6)?,
+                    })
+                },
             )?
             .collect::<Result<_, _>>()?;
         bars.reverse();
@@ -50,8 +62,19 @@ impl Store {
                    updated_at_ms=excluded.updated_at_ms",
             )?;
             for bar in bars {
-                insert.execute(params![source.watchlist_slug(), symbol, timeframe.label(), bar.open_time,
-                    bar.close_time, bar.open, bar.high, bar.low, bar.close, bar.volume, updated_at_ms])?;
+                insert.execute(params![
+                    source.watchlist_slug(),
+                    symbol,
+                    timeframe.label(),
+                    bar.open_time,
+                    bar.close_time,
+                    bar.open,
+                    bar.high,
+                    bar.low,
+                    bar.close,
+                    bar.volume,
+                    updated_at_ms
+                ])?;
             }
         }
         transaction.commit()

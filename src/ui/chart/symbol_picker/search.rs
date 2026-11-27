@@ -82,10 +82,16 @@ impl Scope {
     pub fn includes(self, source: DataSource) -> bool {
         match self {
             Self::All | Self::Watchlists => PROVIDERS.contains(&source),
-            Self::Stocks => matches!(source, DataSource::Alpaca | DataSource::Yahoo | DataSource::Local),
+            Self::Stocks => matches!(
+                source,
+                DataSource::Alpaca | DataSource::Yahoo | DataSource::Local
+            ),
             Self::Crypto => {
                 PROVIDERS.contains(&source)
-                    && !matches!(source, DataSource::Alpaca | DataSource::Yahoo | DataSource::Local)
+                    && !matches!(
+                        source,
+                        DataSource::Alpaca | DataSource::Yahoo | DataSource::Local
+                    )
             }
             Self::Predictions => PREDICTION_PROVIDERS.contains(&source),
             Self::Dashboards => source == DataSource::CoinMarketCap,

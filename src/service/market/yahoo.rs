@@ -7,7 +7,7 @@
 use super::candles::plan;
 use crate::model::market::bucket::{bucket_start_ms, next_bucket_start_ms};
 use crate::model::{DataSource, Kline, Timeframe};
-use crate::service::{rank_results, MarketSource, ProviderError, SearchResult};
+use crate::service::{MarketSource, ProviderError, SearchResult, rank_results};
 use crate::store::SharedStore;
 use serde_json::Value;
 use std::sync::OnceLock;
@@ -16,7 +16,10 @@ const CHART_URL: &str = "https://query1.finance.yahoo.com/v8/finance/chart";
 const SEARCH_URL: &str = "https://query1.finance.yahoo.com/v1/finance/search";
 const MAX_BARS: usize = 10_000;
 const YAHOO_HEADERS: [(&str, &str); 2] = [
-    ("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+    (
+        "User-Agent",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    ),
     ("Accept", "*/*"),
 ];
 
@@ -140,9 +143,12 @@ fn fetch_bars(
             now_seconds() - calendar_days as i64 * 86_400
         ));
     }
-    let body =
-        crate::service::net::http::get_text(&url, &YAHOO_HEADERS, crate::service::net::http::Retry::Transient)
-            .map_err(ProviderError::from)?;
+    let body = crate::service::net::http::get_text(
+        &url,
+        &YAHOO_HEADERS,
+        crate::service::net::http::Retry::Transient,
+    )
+    .map_err(ProviderError::from)?;
     parse_bars(&body, timeframe)
 }
 

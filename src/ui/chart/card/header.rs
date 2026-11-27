@@ -179,10 +179,11 @@ impl ChartCard {
                                             {
                                                 format!(
                                                     "{label} · {}",
-                                                    format::headline(price, true)
+                                                    headline_for(source, price, true)
                                                 )
                                             } else {
-                                                format::headline(
+                                                headline_for(
+                                                    source,
                                                     last.close,
                                                     source.is_prediction_market(),
                                                 )
@@ -219,8 +220,8 @@ impl ChartCard {
                                         .size()
                                         .x
                                 };
-                                let full = change_text(wide.then_some(amount), percent);
-                                let short = change_text(None, percent);
+                                let full = change_text(wide.then_some(amount), percent, source);
+                                let short = change_text(None, percent, source);
                                 let text = if measure(&full) <= room {
                                     Some(full)
                                 } else if measure(&short) <= room {
@@ -382,15 +383,26 @@ fn pills_beside_star<R>(
 
 /// `+$67.13 (+0.10%)`, or `+0.10%` when the amount is left out (prediction markets quote
 /// probabilities, so a price difference means nothing there).
-pub(super) fn change_text(amount: Option<f64>, percent: f64) -> String {
+pub(super) fn change_text(amount: Option<f64>, percent: f64, source: DataSource) -> String {
     let sign = if percent >= 0.0 { "+" } else { "-" };
     match amount {
         Some(amount) => format!(
             "{sign}{} ({sign}{:.2}%)",
-            format::headline(amount.abs(), false),
+            headline_for(source, amount.abs(), false),
             percent.abs()
         ),
         None => format!("{sign}{:.2}%", percent.abs()),
+    }
+}
+
+/// NSE data from Yahoo or the local NSE CSV source is priced in Indian rupees. Other price
+/// providers retain the app's existing USD headline convention.
+fn headline_for(source: DataSource, value: f64, probability: bool) -> String {
+    let text = format::headline(value, probability);
+    if probability || !matches!(source, DataSource::Yahoo | DataSource::Local) {
+        text
+    } else {
+        text.replacen('$', "₹", 1)
     }
 }
 

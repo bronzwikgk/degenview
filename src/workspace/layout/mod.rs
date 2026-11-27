@@ -353,10 +353,7 @@ impl ChartWorkspace {
         self.flush_autosave();
 
         let views = self.load_saved_views();
-        if let Some(existing) = views
-            .iter()
-            .find(|v| v.name.eq_ignore_ascii_case(sym))
-        {
+        if let Some(existing) = views.iter().find(|v| v.name.eq_ignore_ascii_case(sym)) {
             self.apply_saved_view(existing, ctx);
         } else {
             // Create a new layout named after the stock with autosave on

@@ -35,6 +35,8 @@ mod modals;
 /// What the workspace should do on the sidebar's behalf.
 #[derive(Clone, Debug, PartialEq)]
 pub enum WatchlistAction {
+    /// Opens the Local NSE conditional screener inside the existing watchlist pane.
+    OpenScreener,
     // Charts.
     /// Open in the tab's focused chart.
     Open(WatchlistInstrument),

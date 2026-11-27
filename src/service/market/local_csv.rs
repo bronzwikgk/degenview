@@ -105,6 +105,14 @@ fn with_index<T>(f: impl FnOnce(&SymbolIndex) -> T) -> Result<T, ProviderError> 
     Ok(f(guard.as_ref().expect("just populated")))
 }
 
+/// The locally available NSE symbols, sorted and detached from the catalog cache.
+///
+/// This is intentionally the scanner's universe rather than a remote exchange listing: a
+/// conditional screen must only report symbols whose locally stored history it can evaluate.
+pub fn symbols() -> Result<Vec<String>, ProviderError> {
+    with_index(|index| index.symbols.clone())
+}
+
 /// Popular NSE tickers shown first when the picker has no query yet, filtered to ones present on disk.
 const FEATURED_SYMBOLS: [&str; 12] = [
     "RELIANCE",
