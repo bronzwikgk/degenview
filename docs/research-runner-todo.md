@@ -9,6 +9,9 @@
 - [ ] Add Watchlist, saved query, new query and immutable universe snapshot sources.
 - [ ] Save historical universe membership with its as-of date.
 - [ ] Add versioned strategy definitions with Context, Setup, Entry, Invalidation, Stop, Exit and Costs blocks.
+- [ ] Give Context, Setup and Entry separate Signal, Trigger and Confirmation conditions.
+- [ ] Persist the signal, trigger, confirmation and execution timestamps, values and failure reasons for every trade lifecycle.
+- [ ] Enforce stage order: no trigger without its signal, no confirmation without its trigger, and no entry fill before entry confirmation.
 - [ ] Implement the REB / Breakout #2 strategy definition with a maximum setup age and opposite-side invalidation.
 - [ ] Build daily historical runner with strict as-of-bar data access.
 - [ ] Record pivot occurrence date separately from pivot confirmation date.

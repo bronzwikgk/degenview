@@ -64,14 +64,47 @@ A strategy is a versioned, saved definition made of these required blocks:
 Each saved strategy version must retain its plain-language summary, machine-readable parameters,
 created time and immutable version ID. A completed run keeps the exact strategy version it used.
 
+### Signal, trigger and confirmation model
+
+Every evaluable strategy block uses the same ordered three-stage contract:
+
+| Stage | Meaning | Historical test rule |
+| --- | --- | --- |
+| **Signal** | A condition is visible and makes the next stage eligible. | Record its bar and values; it does not itself advance a trade. |
+| **Trigger** | The event that acts on the active signal. | Record the trigger bar; it starts the confirmation window/state. |
+| **Confirmation** | The required validation of that trigger. | Advance only when confirmation is available using bars known at that time. |
+
+This applies independently to **Trade Context**, **Trade Setup**, and **Entry**:
+
+```text
+Context signal → context trigger → context confirmation
+    → Setup signal → setup trigger → setup confirmation
+        → Entry signal → entry trigger → entry confirmation → execute trade
+```
+
+Each stage stores its occurrence time, confirmation time where different, condition result,
+relevant prices/values, and failure reason. A later stage cannot occur without its own prior stage
+being active. If a confirmation needs future bars, the strategy must name its confirmation delay;
+the runner exposes the result only when those bars have closed.
+
+For Entry, the confirmation is distinct from execution: the configured close or next-bar-open fill
+happens only after entry confirmation. The report records signal, trigger, confirmation and fill as
+separate events.
+
 ### Initial REB strategy requirements
 
 The first supported strategy must express the existing REB / Breakout #2 study as explicit rules:
 
 ```text
-Context:           REB detected.
-Setup:             First full-range breakout above REB high.
-Entry:             Second full-range breakout above REB high.
+Context signal:    REB detected.
+Context trigger:   REB range is registered as active.
+Context confirm:   REB remains valid under the configured context confirmation rule.
+Setup signal:      First full-range breakout above REB high.
+Setup trigger:     The first breakout closes and starts the setup state.
+Setup confirm:     The configured setup confirmation rule validates the first breakout.
+Entry signal:      A confirmed setup remains active.
+Entry trigger:     Second full-range breakout above REB high.
+Entry confirm:     The configured entry confirmation rule validates the second breakout.
 Invalidation:      Close below REB low before entry.
 Setup expiry:      User-defined maximum bars after REB.
 Stop:              REB low.
@@ -143,12 +176,14 @@ Each completed historical run and paper campaign must retain an audit record and
 - Universe size and symbols actually processed.
 - Strategy version and parameter values.
 - Date range, timeframe and execution model.
+- Context, setup and entry signal/trigger/confirmation counts.
 - Candidate, cancelled, expired, entered and open counts.
 - Trades, net return, win rate, average win/loss, expectancy, maximum drawdown and exposure.
 
 ### Trade ledger
 
 - Symbol and data source.
+- Context, setup and entry signal/trigger/confirmation dates and reasons.
 - Signal date, pivot occurrence date where relevant, pivot confirmation date, entry date and exit
   date.
 - Entry, stop, target and exit prices.
