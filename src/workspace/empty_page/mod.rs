@@ -141,6 +141,8 @@ impl ChartWorkspace {
                     self.store_recents(&page.recents);
                 }
                 EmptyStateAction::ShowFavorites => self.watchlist_pane.set_visible(true),
+                EmptyStateAction::OpenScreener => self.watchlist_pane.open_screener(),
+                EmptyStateAction::OpenProjects => self.projects_pane.toggle(),
             }
         }
         self.empty_page.data = Some(page);

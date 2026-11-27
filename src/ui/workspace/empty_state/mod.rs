@@ -1,7 +1,6 @@
 //! What a chart tab shows before it has a chart (Swift `EmptyStateView`): a search launcher and,
-//! under it, tabs of one-click ways into a market: recently opened ones, favorites, suggestions
-//! for someone starting out, and saved layouts. Behind the top of the page a trend line keeps
-//! moving.
+//! under it, shortcuts to recently opened markets, the screener, projects and saved layouts.
+//! Behind the top of the page a trend line keeps moving.
 
 mod backdrop;
 mod tabs;
@@ -70,6 +69,8 @@ pub enum EmptyStateAction {
     RemoveRecent(usize),
     ClearRecents,
     ShowFavorites,
+    OpenScreener,
+    OpenProjects,
 }
 
 pub struct EmptyStateOutput {
@@ -280,8 +281,7 @@ mod tests {
                 let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                     let page = show(ui, &input, &mut state);
                     assert!(page.actions.is_empty());
-                    let shows_markets = matches!(tab, Tab::Suggestions)
-                        || (returning && matches!(tab, Tab::Recent | Tab::Favorites));
+                    let shows_markets = returning && matches!(tab, Tab::Recent);
                     assert_eq!(
                         !page.wanted.is_empty(),
                         shows_markets,
@@ -313,7 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn suggestions_always_include_stocks() {
+    fn non_market_tabs_do_not_request_market_trends() {
         let trends = HashMap::new();
         let input = EmptyStateInput {
             favorites: &[],
@@ -322,7 +322,8 @@ mod tests {
             layouts: &[],
             trends: &trends,
         };
-        assert_eq!(wanted(&input, Tab::Suggestions), 20);
+        assert_eq!(wanted(&input, Tab::Screener), 0);
+        assert_eq!(wanted(&input, Tab::Projects), 0);
     }
 
     #[test]
@@ -341,21 +342,6 @@ mod tests {
     }
 
     #[test]
-    fn capped_favorites_end_in_a_tile_that_opens_the_rest() {
-        let trends = HashMap::new();
-        let favorites = [favorite("BTCUSDT"), favorite("ETHUSDT")];
-        let input = |hidden| EmptyStateInput {
-            favorites: &favorites,
-            hidden_favorites: hidden,
-            recents: &[],
-            layouts: &[],
-            trends: &trends,
-        };
-        // The "more" tile is not a market, so it asks for no week.
-        assert_eq!(wanted(&input(3), Tab::Favorites), 2);
-        assert_eq!(wanted(&input(0), Tab::Favorites), 2);
-    }
-
     /// Pictures of the page for a person to look at. Run by hand:
     /// `DEGENVIEW_GALLERY_DIR=… cargo test --lib empty_state -- --ignored`.
     #[test]
@@ -423,9 +409,9 @@ mod tests {
         for (theme_name, app_theme) in [("dark", AppTheme::Dark), ("light", AppTheme::Light)] {
             for (width, size_name) in [(1100.0, "wide"), (640.0, "narrow")] {
                 for (returning, tab) in [
-                    (false, Tab::Suggestions),
                     (true, Tab::Recent),
-                    (true, Tab::Favorites),
+                    (true, Tab::Screener),
+                    (true, Tab::Projects),
                     (true, Tab::Layouts),
                     (false, Tab::Recent),
                 ] {

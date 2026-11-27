@@ -51,19 +51,19 @@ const STOCKS: [(&str, &str); 10] = [
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Tab {
     Recent,
-    Favorites,
-    Suggestions,
+    Screener,
+    Projects,
     Layouts,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 4] = [Tab::Recent, Tab::Favorites, Tab::Suggestions, Tab::Layouts];
+    pub const ALL: [Tab; 4] = [Tab::Recent, Tab::Screener, Tab::Projects, Tab::Layouts];
 
     pub fn title(self) -> &'static str {
         match self {
             Tab::Recent => "Recent",
-            Tab::Favorites => "Favorites",
-            Tab::Suggestions => "Suggestions",
+            Tab::Screener => "Screener",
+            Tab::Projects => "Projects",
             Tab::Layouts => "Layouts",
         }
     }
@@ -71,33 +71,52 @@ impl Tab {
     pub fn icon(self) -> Icon {
         match self {
             Tab::Recent => Icon::ClockArrow,
-            Tab::Favorites => Icon::Star,
-            Tab::Suggestions => Icon::Sparkles,
+            Tab::Screener => Icon::Magnifier,
+            Tab::Projects => Icon::Clipboard,
             Tab::Layouts => Icon::Books,
         }
     }
 }
 
-/// The tab a page opens on: the first of Recent, Favorites and Layouts that has something in it,
-/// and for someone with nothing yet, Suggestions.
+/// The tab a page opens on: Recent when available, otherwise saved layouts.
 pub fn default_tab(input: &EmptyStateInput) -> Tab {
     if !input.recents.is_empty() {
         Tab::Recent
-    } else if !input.favorites.is_empty() {
-        Tab::Favorites
     } else if !input.layouts.is_empty() {
         Tab::Layouts
     } else {
-        Tab::Suggestions
+        Tab::Recent
     }
 }
 
 pub fn show(ui: &mut Ui, tab: Tab, input: &EmptyStateInput, frame: &mut Frame) {
     match tab {
         Tab::Recent => recent(ui, input, frame),
-        Tab::Favorites => favorites(ui, input, frame),
-        Tab::Suggestions => suggestions(ui, frame),
+        Tab::Screener => open_screener(ui, frame),
+        Tab::Projects => open_projects(ui, frame),
         Tab::Layouts => layouts(ui, input, frame),
+    }
+}
+
+fn open_screener(ui: &mut Ui, frame: &mut Frame) {
+    tiles::note(
+        ui,
+        Icon::Magnifier,
+        "Open the Local NSE conditional screener in this workspace.",
+    );
+    if ui.button("Open Screener").clicked() {
+        frame.actions.push(EmptyStateAction::OpenScreener);
+    }
+}
+
+fn open_projects(ui: &mut Ui, frame: &mut Frame) {
+    tiles::note(
+        ui,
+        Icon::Clipboard,
+        "Open your local project and task tracker in this workspace.",
+    );
+    if ui.button("Open Projects").clicked() {
+        frame.actions.push(EmptyStateAction::OpenProjects);
     }
 }
 
@@ -313,13 +332,9 @@ mod tests {
         }
     }
 
-    fn tab_for(has_recent: bool, has_favorite: bool, has_layout: bool) -> Tab {
+    fn tab_for(has_recent: bool, has_layout: bool) -> Tab {
         let (favorites, recents, layouts) = (
-            if has_favorite {
-                vec![favorite()]
-            } else {
-                vec![]
-            },
+            Vec::new(),
             if has_recent { vec![recent()] } else { vec![] },
             if has_layout { vec![layout()] } else { vec![] },
         );
@@ -334,18 +349,17 @@ mod tests {
 
     #[test]
     fn the_page_opens_on_the_first_tab_with_something_in_it() {
-        assert_eq!(tab_for(false, false, false), Tab::Suggestions);
-        assert_eq!(tab_for(true, true, true), Tab::Recent);
-        assert_eq!(tab_for(false, true, true), Tab::Favorites);
-        assert_eq!(tab_for(false, false, true), Tab::Layouts);
-        assert_eq!(tab_for(true, false, false), Tab::Recent);
+        assert_eq!(tab_for(false, false), Tab::Recent);
+        assert_eq!(tab_for(true, true), Tab::Recent);
+        assert_eq!(tab_for(false, true), Tab::Layouts);
+        assert_eq!(tab_for(true, false), Tab::Recent);
     }
 
     #[test]
     fn the_tabs_are_in_the_order_the_page_shows_them() {
         assert_eq!(
             Tab::ALL.map(Tab::title),
-            ["Recent", "Favorites", "Suggestions", "Layouts"]
+            ["Recent", "Screener", "Projects", "Layouts"]
         );
     }
 }

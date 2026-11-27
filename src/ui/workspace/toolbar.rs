@@ -357,16 +357,6 @@ fn right_items(input: &ToolbarInput) -> Vec<Item> {
                 .active(input.watchlist_visible)
                 .on_click(ToolbarAction::ToggleWatchlist),
         ),
-        Item::Button(
-            Button::new("screener", "Local NSE conditional screener")
-                .icon(Icon::Magnifier)
-                .on_click(ToolbarAction::OpenScreener),
-        ),
-        Item::Button(
-            Button::new("projects", "Projects and development tasks")
-                .icon(Icon::Clipboard)
-                .on_click(ToolbarAction::ToggleProjects),
-        ),
     ]
 }
 
