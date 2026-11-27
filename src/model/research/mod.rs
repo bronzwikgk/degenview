@@ -14,6 +14,43 @@ pub struct UniverseMember {
     pub universe_labels: Vec<String>,
 }
 
+/// Immutable input to a forward-only paper campaign. The symbols and labels are copied when the
+/// campaign is started; it never follows later edits to a Watchlist or screener result.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FrozenUniverse {
+    pub as_of_ms: i64,
+    pub members: Vec<UniverseMember>,
+}
+
+impl FrozenUniverse {
+    pub fn from_sets(
+        as_of_ms: i64,
+        sets: impl IntoIterator<Item = (String, Vec<(String, String)>)>,
+    ) -> Self {
+        Self {
+            as_of_ms,
+            members: merge_universes(sets),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum CampaignStatus {
+    Active,
+    Stopped,
+}
+
+/// A forward-only campaign definition. Historical runners must never create this value or submit
+/// a paper order; a host creates it explicitly after freezing the universe and strategy version.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PaperCampaign {
+    pub id: String,
+    pub strategy_version: String,
+    pub account_id: u64,
+    pub universe: FrozenUniverse,
+    pub status: CampaignStatus,
+}
+
 impl UniverseMember {
     pub fn key(&self) -> String {
         format!("{}:{}", self.source, self.symbol)
@@ -284,6 +321,24 @@ mod tests {
         ]);
         assert_eq!(members.len(), 1);
         assert_eq!(members[0].universe_labels, ["NSE 50", "F&O"]);
+    }
+
+    #[test]
+    fn frozen_campaign_universe_keeps_its_original_membership() {
+        let frozen = FrozenUniverse::from_sets(
+            123,
+            [("Breakouts".into(), vec![("Local".into(), "IDEA".into())])],
+        );
+        let campaign = PaperCampaign {
+            id: "campaign-1".into(),
+            strategy_version: "REB v1".into(),
+            account_id: 9,
+            universe: frozen.clone(),
+            status: CampaignStatus::Active,
+        };
+        assert_eq!(campaign.universe.as_of_ms, 123);
+        assert_eq!(campaign.universe.members[0].symbol, "IDEA");
+        assert_eq!(campaign.universe.members[0].universe_labels, ["Breakouts"]);
     }
     #[test]
     fn stages_cannot_skip_confirmation_order() {
