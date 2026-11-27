@@ -21,6 +21,7 @@ pub mod paper;
 pub mod pattern;
 pub mod pine;
 pub mod portfolio;
+pub mod research;
 pub mod screener;
 pub mod session_stats;
 pub mod tab;
