@@ -328,7 +328,7 @@ mod tests {
     fn simulator_waits_for_next_open_and_charges_round_trip_costs() {
         let candles = [
             candle(10.0, 10.0, 10.0, 10.0),
-            candle(11.0, 12.5, 10.5, 12.0),
+            candle(11.0, 12.0, 10.5, 12.0),
         ];
         let trades = simulate_long(
             &candles,
