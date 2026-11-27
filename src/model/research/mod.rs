@@ -3,7 +3,7 @@
 //! The executor is deliberately independent of live paper quotes, storage and UI. A caller feeds
 //! one completed daily bar at a time and receives an auditable lifecycle event.
 
-use crate::model::market::Kline;
+use crate::model::Kline;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
