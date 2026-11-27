@@ -257,6 +257,16 @@ pub fn simulate_long(
     trades
 }
 
+/// The first built-in entry rule. It is deliberately explicit and uses only the current close
+/// and the preceding completed bar, making it safe for historical and forward evaluation.
+pub fn close_above_previous_high_entries(candles: &[Kline]) -> Vec<bool> {
+    candles
+        .iter()
+        .enumerate()
+        .map(|(index, candle)| index > 0 && candle.close > candles[index - 1].high)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
