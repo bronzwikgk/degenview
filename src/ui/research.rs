@@ -2,8 +2,8 @@
 
 use crate::lock::lock;
 use crate::model::research::{
-    ExecutionModel, HistoricalConfig, HistoricalTrade, close_above_previous_high_entries,
-    simulate_long,
+    ExecutionModel, HistoricalConfig, HistoricalTrade, UniverseMember,
+    close_above_previous_high_entries, merge_universes, simulate_long,
 };
 use crate::model::{DataSource, Timeframe};
 use crate::service::{
@@ -64,26 +64,33 @@ struct SavedResearch {
 struct RunReport {
     scanned: usize,
     skipped: usize,
-    trades: Vec<(String, HistoricalTrade)>,
+    trades: Vec<ResearchTrade>,
+}
+#[derive(Clone, Deserialize, Serialize)]
+struct ResearchTrade {
+    symbol: String,
+    universe_labels: Vec<String>,
+    trade: HistoricalTrade,
 }
 impl RunReport {
     fn net_return(&self) -> f64 {
-        self.trades
-            .iter()
-            .map(|(_, trade)| trade.net_return_pct)
-            .sum()
+        self.trades.iter().map(|row| row.trade.net_return_pct).sum()
     }
     fn wins(&self) -> usize {
         self.trades
             .iter()
-            .filter(|(_, trade)| trade.net_return_pct > 0.0)
+            .filter(|row| row.trade.net_return_pct > 0.0)
             .count()
     }
 }
-fn run_local(symbols: Vec<String>, execution: ExecutionModel) -> RunReport {
+fn run_local(members: Vec<UniverseMember>, execution: ExecutionModel) -> RunReport {
     let mut report = RunReport::default();
-    for symbol in symbols {
-        match fetch_klines(DataSource::Local, &symbol, Timeframe::DAY_1, 1500) {
+    for member in members {
+        if member.source != "Local" {
+            report.skipped += 1;
+            continue;
+        }
+        match fetch_klines(DataSource::Local, &member.symbol, Timeframe::DAY_1, 1500) {
             Ok(candles) if candles.len() > 2 => {
                 report.scanned += 1;
                 let entries = close_above_previous_high_entries(&candles);
@@ -95,11 +102,17 @@ fn run_local(symbols: Vec<String>, execution: ExecutionModel) -> RunReport {
                     commission_pct: 0.0,
                     slippage_pct: 0.0,
                 };
-                report.trades.extend(
-                    simulate_long(&candles, &entries, config)
-                        .into_iter()
-                        .map(|trade| (symbol.clone(), trade)),
-                );
+                report
+                    .trades
+                    .extend(
+                        simulate_long(&candles, &entries, config)
+                            .into_iter()
+                            .map(|trade| ResearchTrade {
+                                symbol: member.symbol.clone(),
+                                universe_labels: member.universe_labels.clone(),
+                                trade,
+                            }),
+                    );
             }
             _ => report.skipped += 1,
         }
@@ -162,6 +175,14 @@ impl ResearchTab {
             if let Some(report) = run.poll() {
                 self.saved.reports.push(report.clone());
                 self.report = Some(report);
+                if let Ok(s) = store.lock() {
+                    if let Err(error) = s.research_set(KEY, &self.saved) {
+                        self.notice =
+                            Some(format!("Completed, but could not save the report: {error}"));
+                    } else {
+                        self.notice = Some("Completed and saved locally.".into());
+                    }
+                }
             }
             if !run.is_pending() {
                 self.run = None;
@@ -248,15 +269,23 @@ impl ResearchTab {
                         .filter(|name| !name.is_empty())
                         .map(str::to_owned)
                         .collect();
-                    let symbols: Vec<String> = lock(watchlist)
+                    let sets: Vec<(String, Vec<(String, String)>)> = lock(watchlist)
                         .lists()
                         .iter()
                         .filter(|list| names.iter().any(|name| name == &list.name))
-                        .flat_map(|list| list.instruments())
-                        .filter(|item| item.instrument.source == DataSource::Local)
-                        .map(|item| item.instrument.api_symbol())
+                        .map(|list| {
+                            (
+                                list.name.clone(),
+                                list.instruments()
+                                    .iter()
+                                    .filter(|item| item.instrument.source == DataSource::Local)
+                                    .map(|item| ("Local".into(), item.instrument.api_symbol()))
+                                    .collect(),
+                            )
+                        })
                         .collect();
-                    if symbols.is_empty() {
+                    let members = merge_universes(sets);
+                    if members.is_empty() {
                         self.notice =
                             Some("Select a Local NSE Watchlist in Universe first.".into());
                     } else {
@@ -268,7 +297,7 @@ impl ResearchTab {
                         self.report = None;
                         self.run = Some(
                             work_queue::SCREENER
-                                .start(Some(ui.ctx()), move || run_local(symbols, execution)),
+                                .start(Some(ui.ctx()), move || run_local(members, execution)),
                         );
                     }
                 }
@@ -295,10 +324,13 @@ impl ResearchTab {
                         win_rate
                     ));
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        for (symbol, trade) in &report.trades {
+                        for row in &report.trades {
                             ui.label(format!(
-                                "{} · {:.2}% · {:?}",
-                                symbol, trade.net_return_pct, trade.reason
+                                "{} · {:.2}% · {:?} · {}",
+                                row.symbol,
+                                row.trade.net_return_pct,
+                                row.trade.reason,
+                                row.universe_labels.join(", ")
                             ));
                         }
                     });
