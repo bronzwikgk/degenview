@@ -224,3 +224,22 @@ or strategy is edited later.
 - Parameter optimization.
 - Predictive claims or signal recommendations.
 
+## Review and acceptance gates
+
+Every increment must identify its delivery state precisely:
+
+| State | Meaning |
+| --- | --- |
+| **Specified** | Requirements are documented; no executable behaviour is claimed. |
+| **Implemented** | Source code exists and has passed its relevant automated checks. |
+| **Visually accepted** | A user has exercised the built application against an explicit acceptance checklist. |
+
+The Research Runner execution engine may not be described as ready merely because this
+specification is complete. Before code implementation begins, the specification must be signed off.
+Before an implemented increment is accepted, its development executable must be checked manually
+against its acceptance checklist.
+
+The UI decision for Screener and Projects remains explicit: the current New Tab entries launch
+their existing workspace panels. A later increment must decide whether those panels remain launch
+targets or are extracted into central, full-tab renderers.
+

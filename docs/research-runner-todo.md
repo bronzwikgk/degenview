@@ -38,3 +38,13 @@
 - Intraday testing.
 - Multi-symbol Pine strategy execution.
 - Parameter optimization.
+
+## Review gates learned from evaluation
+
+- [ ] Obtain sign-off on `research-runner-spec.md` before implementing the execution engine.
+- [ ] Label all reports and release notes as Specified, Implemented, or Visually accepted; do not
+  imply that a documented feature is executable.
+- [ ] Add an explicit manual acceptance checklist to each built increment and record its result.
+- [ ] Decide whether Screener and Projects must become central full-tab renderers instead of New
+  Tab launch routes to their existing workspace panels.
+- [ ] Keep reviewer-facing Markdown in UTF-8 so symbols and punctuation render consistently.
