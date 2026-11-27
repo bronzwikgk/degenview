@@ -1,7 +1,9 @@
 # Research Runner implementation plan by file
 
-**Status:** Planned. No files in this plan have been created for the Research Runner yet.  
-**Prerequisite:** Sign-off on `docs/research-runner-spec.md`.
+**Status:** In progress. The pure research model, local persistence, persisted Research tab,
+watchlist Universe Sets, date/configured Local NSE runner, and isolated worker lane are implemented.
+Paper Campaign orchestration, screener-snapshot sources, and the full report/diagnostic suite remain
+in progress and must not be represented as executable until their tests and UI exist.
 
 ## Implementation order
 
