@@ -13,6 +13,7 @@ use crate::service::{
 use crate::store::{SharedStore, watchlist::WatchlistStore};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 const KEY: &str = "workspace";
@@ -125,6 +126,17 @@ impl RunReport {
             .iter()
             .filter(|row| row.trade.net_return_pct > 0.0)
             .count()
+    }
+    fn by_universe(&self) -> BTreeMap<&str, (usize, f64)> {
+        let mut result = BTreeMap::new();
+        for row in &self.trades {
+            for label in &row.universe_labels {
+                let entry = result.entry(label.as_str()).or_insert((0, 0.0));
+                entry.0 += 1;
+                entry.1 += row.trade.net_return_pct;
+            }
+        }
+        result
     }
 }
 fn run_local(
@@ -411,6 +423,13 @@ impl ResearchTab {
                         report.net_return(),
                         win_rate
                     ));
+                    if report.by_universe().len() > 1 {
+                        ui.separator();
+                        ui.strong("Per source universe");
+                        for (label, (trades, net_return)) in report.by_universe() {
+                            ui.label(format!("{label}: {trades} trades · {net_return:+.2}%"));
+                        }
+                    }
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         for row in &report.trades {
                             ui.label(format!(
