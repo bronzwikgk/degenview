@@ -202,6 +202,12 @@ impl WatchlistPane {
         self.visible = !self.visible;
     }
 
+    /// Opens the conditional screener directly from the workspace toolbar.
+    pub(super) fn open_screener(&mut self) {
+        self.visible = true;
+        self.screener_visible = true;
+    }
+
     /// Shows why a change was refused (a failed save shows the store's own message).
     pub(super) fn report(&mut self, result: Result<(), WatchlistError>) {
         report_watchlist(&mut self.notice, result);

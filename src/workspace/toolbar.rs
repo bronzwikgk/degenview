@@ -114,6 +114,8 @@ impl ChartWorkspace {
                 ToolbarAction::ToggleWatchlist => {
                     self.watchlist_pane.toggle();
                 }
+                ToolbarAction::OpenScreener => self.watchlist_pane.open_screener(),
+                ToolbarAction::ToggleProjects => self.projects_pane.toggle(),
                 ToolbarAction::ToggleMarketFlow => self.market_flow.toggle(),
                 ToolbarAction::OpenPortfolio => actions.push(WorkspaceAction::OpenPortfolio),
                 ToolbarAction::OpenPineStudio => {

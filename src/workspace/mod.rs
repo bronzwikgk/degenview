@@ -32,6 +32,7 @@ use drawing::tools::DrawingTools;
 use eframe::egui;
 use empty_page::EmptyPageCache;
 use layout::session::LayoutSession;
+use projects::ProjectsPane;
 use replay::ReplayState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -52,6 +53,7 @@ mod layout;
 mod market_flow;
 mod overlay;
 mod pine;
+mod projects;
 mod replay;
 mod tab_link;
 #[cfg(test)]
@@ -187,6 +189,7 @@ pub struct ChartWorkspace {
     quote_coordinator: WatchlistQuoteCoordinator,
     /// The watchlist sidebar and what it asks of the tab.
     watchlist_pane: WatchlistPane,
+    projects_pane: ProjectsPane,
     /// The market-flow panel: shown or not, its mode and filters. A tab starts without it.
     market_flow: market_flow::MarketFlowPane,
     /// The order sheet and the orders panel, and the venue they trade on.
@@ -318,6 +321,7 @@ impl ChartWorkspace {
             quote_book,
             quote_coordinator,
             watchlist_pane: WatchlistPane::default(),
+            projects_pane: ProjectsPane::default(),
             market_flow: market_flow::MarketFlowPane::default(),
             trade: TradeSide::default(),
             context: ContextState::default(),
@@ -622,6 +626,13 @@ impl ChartWorkspace {
         actions.extend(rail_actions);
 
         self.show_watchlist_panel(ui, &ctx);
+        if self.projects_pane.visible() {
+            egui::Panel::right("projects")
+                .default_size(520.0)
+                .show(ui, |ui| {
+                    projects::show(ui, &mut self.projects_pane, &self.store)
+                });
+        }
         self.show_market_flow_panel(ui, &ctx);
 
         actions.extend(self.show_trade_panels(ui, paper));
