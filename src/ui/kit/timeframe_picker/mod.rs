@@ -17,6 +17,7 @@ use super::{
     HEADING_INSET, MEDIUM, MENU_FRAME_MARGIN, REGULAR, galley, menu_frame, menu_heading,
     menu_scope, menu_separator, size, tile_chip, tile_chip_text_width,
 };
+use crate::i18n::tr;
 use crate::model::{DataSource, Timeframe};
 use crate::ui::icons::Icon;
 use crate::ui::theme;
@@ -140,7 +141,7 @@ impl Body<'_> {
             Icon::Clock,
             &mut state.query,
             false,
-            "Type any timeframe: 22m, 3h, 2D",
+            tr!("Type any timeframe: 22m, 3h, 2D"),
             field_id,
             !state.focused_once,
         );
@@ -252,7 +253,7 @@ fn typed_row(ui: &mut Ui, timeframe: Timeframe, highlighted: bool) -> bool {
     }
     let label = galley(
         ui,
-        &format!("Chart {timeframe}"),
+        &tr!("Chart {timeframe}", timeframe = timeframe),
         size::BODY,
         MEDIUM,
         theme::text_primary(),
@@ -306,9 +307,9 @@ fn note(ui: &mut Ui, message: &str) {
 
 fn footer_hints() -> Vec<Hint<'static>> {
     vec![
-        Hint::new(&["\u{21b5}"], "chart it"),
-        Hint::new(&["\u{21e7}", "\u{21b5}"], "chart and pin"),
-        Hint::new(&["\u{2191}", "\u{2193}"], "move"),
+        Hint::new(&["\u{21b5}"], tr!("chart it")),
+        Hint::new(&["\u{21e7}", "\u{21b5}"], tr!("chart and pin")),
+        Hint::new(&["\u{2191}", "\u{2193}"], tr!("move")),
     ]
 }
 
@@ -317,5 +318,5 @@ fn footer(ui: &mut Ui) {
     let (rect, _) =
         ui.allocate_exact_size(vec2(ui.available_width(), FOOTER_HEIGHT), Sense::hover());
     let row = rect.with_min_x(rect.left() + HEADING_INSET);
-    hint_row(ui, row, footer_hints(), FOOTER_TEXT, &["move"]);
+    hint_row(ui, row, footer_hints(), FOOTER_TEXT, &[tr!("move")]);
 }

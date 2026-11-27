@@ -9,6 +9,7 @@
 
 use super::overlays::OverlayFrame;
 use super::*;
+use crate::i18n::tr;
 use crate::model::chart::canvas::PaneHeights;
 use crate::ui::pine::chart_render::{hover_targets_in_order, target_at};
 
@@ -45,6 +46,9 @@ pub(super) struct FrameData<'a> {
     pub constructed: Option<&'a ConstructedSeries>,
     pub outputs: &'a [Placed],
     pub indicators: &'a IndicatorConfig,
+    /// The time the forming bar has left, resolved once for the frame (a snapshot's is the one
+    /// it was taken with). `None` when there is nothing to promise.
+    pub countdown: Option<Countdown>,
 }
 
 impl FrameData<'_> {
@@ -201,12 +205,13 @@ impl ChartCard {
         };
         let pane_specs: Vec<PaneSpec> = pane_outputs
             .iter()
-            .map(|(id, _)| PaneSpec {
-                id: *id,
-                collapsed: self
+            .map(|(id, _)| {
+                let pane = self
                     .instances
                     .iter()
-                    .any(|instance| instance.id == *id && instance.pane_collapsed),
+                    .find(|instance| instance.id == *id)
+                    .map(|instance| instance.pane);
+                PaneSpec::of(*id, pane.unwrap_or_default())
             })
             .collect();
         let maximized = self
@@ -247,6 +252,26 @@ impl ChartCard {
                     .x
             };
             let mut widest = 0.0f32;
+            // The countdown's width comes from what the chart could show, not from what it shows
+            // now, so the axis keeps its width as the digits change and as the countdown comes
+            // and goes with the connection.
+            if let Some(timeframe) = self
+                .timeframe
+                .filter(|_| style.bar_countdown && countdown::eligible(chart_type, data.source))
+            {
+                for text in countdown::widest_texts(timeframe) {
+                    widest = widest.max(
+                        price_text::PriceText::new(
+                            painter,
+                            &text,
+                            style.price_font(),
+                            style.text_color,
+                        )
+                        .size()
+                        .x,
+                    );
+                }
+            }
             if let Some(view) = self.view(
                 framing,
                 bars,
@@ -366,10 +391,16 @@ impl ChartCard {
             })
             .collect();
 
-        // Every time label is as wide: the same eleven monospaced characters.
+        // Every time label is as wide: the same eleven (fourteen with seconds) monospaced
+        // characters.
         let label_width = painter
             .layout_no_wrap(
-                "00-00 00:00".to_owned(),
+                if self.shows_seconds() {
+                    "00-00 00:00:00"
+                } else {
+                    "00-00 00:00"
+                }
+                .to_owned(),
                 style.time_font(),
                 style.text_color,
             )
@@ -393,15 +424,16 @@ impl ChartCard {
             .shows(decor.replay_active)
         {
             let title = self.display_title(data.symbol, data.source);
-            let mut subtitle = self
-                .timeframe
-                .map_or_else(String::new, |timeframe| format!("{} · ", timeframe.label()));
-            subtitle.push_str(self.timeframe.map_or_else(
-                || data.source.display_name(),
-                |timeframe| data.source.chart_feed_label(timeframe),
-            ));
+            let mut subtitle = match self.timeframe {
+                Some(timeframe) => tr!(
+                    "{timeframe} · {source}",
+                    timeframe = timeframe.label(),
+                    source = data.source.chart_feed_label(timeframe)
+                ),
+                None => data.source.display_name().to_owned(),
+            };
             if decor.replay_active {
-                subtitle.push_str(" · Replay");
+                subtitle = tr!("{subtitle} · Replay", subtitle = subtitle);
             }
             canvas::paint_watermark(&main_painter, plot, &title, &subtitle, style.watermark);
         }
@@ -472,9 +504,6 @@ impl ChartCard {
         if let Some(bands) = &series.bollinger {
             self.draw_bollinger(&clipped, &x_for, scale, bands);
         }
-        if !series.rsi.is_empty() {
-            self.draw_rsi(&clipped, plot, &x_for, &series.rsi);
-        }
         if !series.trend_flips.is_empty() {
             self.draw_trend_flips(&clipped, plot, &x_for, scale, shown, &series.trend_flips);
         }
@@ -502,16 +531,16 @@ impl ChartCard {
                 target_at(&targets, pointer).cloned()
             });
 
-        self.draw_last_price(
+        let last_price_tag = self.draw_last_price(
             &main_painter,
             plot,
             rect,
             scale,
             candles,
             shown_synthetic.and_then(|_| bars.last()),
+            data.countdown.filter(|_| style.bar_countdown),
             style,
         );
-        let main_tag_y = candles.last().map(|last| scale.y(last.close));
         self.paint_overlay_tags(
             &main_painter,
             &clipped,
@@ -520,7 +549,7 @@ impl ChartCard {
             &overlay_frame,
             view,
             style,
-            main_tag_y,
+            last_price_tag,
         );
         self.draw_time_axis(
             painter,

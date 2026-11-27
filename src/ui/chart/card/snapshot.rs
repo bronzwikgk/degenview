@@ -11,6 +11,8 @@ use super::frame::{
 };
 use super::overlays::OverlayFrame;
 use super::*;
+use crate::i18n::tr;
+use crate::model::chart::countdown::Countdown;
 use crate::model::chart::snapshot::SnapshotDimensions;
 use crate::model::{Drawing, Tool};
 use crate::service::snapshot::raster::Scene;
@@ -32,6 +34,8 @@ pub struct SnapshotInput<'a> {
     pub images: Option<&'a Images>,
     pub hide_all_drawings: bool,
     pub replay_active: bool,
+    /// The time the forming bar had left when the picture was taken, frozen with it.
+    pub countdown: Option<Countdown>,
     /// Draw the paper-trading orders and positions, if the chart shows them.
     pub include_trading: bool,
     pub frame: SnapshotFrame<'a>,
@@ -103,10 +107,10 @@ pub enum SnapshotError {
 }
 
 impl SnapshotError {
-    pub const fn message(self) -> &'static str {
+    pub fn message(self) -> &'static str {
         match self {
-            Self::Empty => "There is nothing on this chart to take a picture of yet.",
-            Self::Unsupported => "This chart cannot be saved as an image.",
+            Self::Empty => tr!("There is nothing on this chart to take a picture of yet."),
+            Self::Unsupported => tr!("This chart cannot be saved as an image."),
         }
     }
 }
@@ -262,6 +266,7 @@ impl ChartCard {
             constructed: constructed.as_deref(),
             outputs: &outputs,
             indicators: &indicators,
+            countdown: input.countdown,
         };
         let layout = self.frame_layout(&data, framing, rect, 0.0, painter, &style);
         let view = self

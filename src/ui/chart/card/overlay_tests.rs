@@ -611,7 +611,7 @@ fn the_card_is_only_there_while_the_crosshair_is_and_has_no_controls_until_a_row
 
 /// The right edge of the plot: where the grid lines stop (the lines that run on to the card's
 /// edge, such as the time axis, are longer).
-fn plot_right(drawn: &super::canvas_tests::Drawn) -> f32 {
+pub(super) fn plot_right(drawn: &super::canvas_tests::Drawn) -> f32 {
     drawn
         .segments
         .iter()
@@ -626,12 +626,15 @@ fn plot_right(drawn: &super::canvas_tests::Drawn) -> f32 {
 fn the_axis_is_wide_enough_for_an_overlays_last_value_tag() {
     // On the Regular axis a compared market's tag reads its own price, which can be far wider than
     // the chart's: the axis has to make room, or the text runs into the plot.
+    // With no countdown to reserve room for: the tag is what widens the axis.
     let plain = {
         let mut chart = Harness::new(ChartCanvas::default());
+        chart.card.appearance_mut().canvas.bar_countdown = false;
         chart.draw().0
     };
     let wide = {
         let mut chart = harness(&[("BIGUSDT", market(300, |n| 1_234_567.891 + n as f64))]);
+        chart.card.appearance_mut().canvas.bar_countdown = false;
         assert_eq!(chart.scale_mode, PriceScaleMode::Regular);
         chart.draw().0
     };
@@ -726,5 +729,99 @@ fn overlay_cost() {
             .sum();
         let megabytes = (count * BARS * std::mem::size_of::<Kline>()) as f64 / 1e6;
         println!("{count:>8} {idle:>14.2} {ticking:>16.2} {megabytes:>14.1} {runs:>12}");
+    }
+}
+
+/// A chart comparing two markets under a crosshair, in the pseudo-locale: the header's hints, the
+/// readout's labels, the compared-markets card and the chart's refresh
+/// warning. `DEGENVIEW_GALLERY_DIR=<dir>` writes the pictures.
+#[test]
+fn a_compared_chart_draws_in_the_pseudo_locale() {
+    use crate::i18n::{Locale, with_locale};
+    use crate::ui::chart::painted_text;
+    use crate::ui::render_tests::{Screen, gallery_dir};
+
+    let _theme = crate::ui::theme::RestoreDefaultTheme;
+    for (theme_name, app_theme) in [
+        ("dark", crate::ui::theme::AppTheme::Dark),
+        ("light", crate::ui::theme::AppTheme::Light),
+    ] {
+        let mut chart = harness(&[
+            ("ETHUSDT", market(300, |n| 4_000.0 + n as f64)),
+            ("SOLUSDT", market(300, |n| 90.0 + n as f64 / 4.0)),
+        ]);
+        chart.replay_active = true;
+        chart.error = Some(ProviderError::other("down"));
+        chart.crosshair = Some(crosshair_at(&chart, 0.85));
+        let mut screen = Screen::new(SIZE);
+        crate::ui::theme::apply(&screen.ctx, app_theme);
+        let mut last = None;
+        with_locale(Locale::PSEUDO, || {
+            for _ in 0..4 {
+                let candles = chart.candles.clone();
+                let (card, indicators, crosshair, replay_active) = (
+                    &mut chart.card,
+                    &chart.indicators,
+                    chart.crosshair,
+                    chart.replay_active,
+                );
+                let error = chart.error.as_ref();
+                last = Some(screen.run(Vec::new(), |ui| {
+                    let mut said = ChartCardAction::default();
+                    card.header(
+                        ui,
+                        "BTCUSDT",
+                        DataSource::Binance,
+                        indicators,
+                        &candles,
+                        replay_active,
+                        false,
+                        &[],
+                        &mut said,
+                        1,
+                    );
+                    let mut drawing = DrawingFrame::new(&[], crate::model::Tool::Cursor, None, 1)
+                        .with_view(Timeframe::HOUR_1, false);
+                    let mut replay = ReplayChartFrame {
+                        selecting: false,
+                        active: replay_active,
+                        picked_ms: None,
+                        picked_range: None,
+                    };
+                    card.body(
+                        ui,
+                        "BTCUSDT",
+                        &candles,
+                        false,
+                        error,
+                        PriceScaleMode::Regular,
+                        DataSource::Binance,
+                        indicators,
+                        crosshair.as_ref(),
+                        1,
+                        &mut drawing,
+                        &mut replay,
+                    );
+                }));
+            }
+        });
+        let last = last.take().expect("a frame");
+        let texts = painted_text::of(&last);
+        painted_text::assert_painted(&texts, "Replay");
+        // The wide card has room for the detailed wording, which ends with the error.
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.starts_with("[Çöûļðñ'ţ ŕéfŕéšĥ") && text.contains("(down)")),
+            "the refresh warning: {texts:#?}"
+        );
+        assert!(
+            texts.iter().any(|text| text.starts_with("[Ö ~] ")),
+            "the readout's open label: {texts:#?}"
+        );
+        if gallery_dir().is_some() {
+            eprintln!("{:?}", painted_text::unbracketed(&texts));
+            screen.save(&format!("pseudo-compared-chart-{theme_name}"), last);
+        }
     }
 }

@@ -12,6 +12,8 @@ Always read [Core guidance](docs/agent-guides/core.md), then every guide whose s
 | Live trading, brokers, broker credentials, or Settings ▸ Brokers | [Live trading](docs/broker-trading.md) |
 | The symbol picker (⌘K, Add Chart and a watchlist's plus: markets, prediction markets, indices and portfolio cards), symbol search ranking, or how markets are named | [Symbol picker](docs/symbol-picker.md) |
 | Any UI: a new or restyled window, sheet, panel, card, sidebar, icon, menu, button, link or dialog | [UI style](docs/agent-guides/ui-style.md) |
+| Any user-facing text, interface languages, `tr!`, dates and times, translation catalogs (`.po`), or the language setting | [Localization](docs/localization.md) |
+| Adding or updating a language, translating `.po` catalogs, or reviewing a translation | [Translation](docs/agent-guides/translation.md) |
 | Chart rendering, price labels, chart types, canvas, templates, drawings, portfolio cards, or snapshots | [Charts](docs/agent-guides/charts.md) |
 | The cursor menu (Cross, Dot, Arrow, Demonstration, Eraser), the crosshair's parts, the pointer shape over a plot, or the values tooltip on long press | [Chart cursors](docs/chart-cursors.md) |
 | The Screenshot Studio, Select portion, snapshot compositions or backgrounds, or the camera menu | [Chart snapshots](docs/snapshots.md) |
@@ -24,6 +26,7 @@ Always read [Core guidance](docs/agent-guides/core.md), then every guide whose s
 | Session statistics: gap fills, prior-day breaks, weekday effects, `degenview_get_session_stats` | [Session statistics](docs/session-stats.md) |
 | The market flow panel (Liquidations, Taker flow, Order book / DOM), the exchanges' liquidation, trade or order-book sockets, or adding an exchange to them | [Liquidations, taker flow and order book](docs/market-flow.md) |
 | Pine language/runtime, Pine Studio, editor behavior, or example scripts | [Pine and scripts](docs/agent-guides/pine.md) |
+| Recording a tutorial or demo video: screen capture, voice-over, subtitles | [Tutorial videos](tools/tutorial-video/README.md) |
 | Adding an indicator to a chart: the toolbar's Indicators button, the indicator catalog, or the Pine indicators bundled with the app | [Indicator catalog](docs/indicator-picker.md) |
 | User-defined functions or methods, overloads, call resolution, or the Pine type checker | [User-defined methods](docs/pine-user-methods.md) |
 | Editor colours, syntax roles, editor themes or fonts | [Editor themes](docs/editor-themes.md) |
@@ -47,6 +50,14 @@ Always read [Core guidance](docs/agent-guides/core.md), then every guide whose s
 For cross-cutting work, load all matching guides. They hold implementation constraints, not
 background; never skip one because the code looks self-explanatory.
 
+## Words go through `tr!`
+
+New or changed user-facing text is written with `tr!` / `tr_n!` / `tr_c!` (`crate::i18n`), never as a
+bare literal in a widget call, and never a sentence assembled from pieces. Existing literals move over
+directory by directory. A new or reworded message is translated in every `assets/locales/*.po` in the
+same change; the tests fail otherwise. Rules and the pseudo-locale for checking a screen:
+[Localization](docs/localization.md).
+
 ## Never blue
 
 Links are always gray (`theme::text_secondary()`, underlined); the blue accent is not used for new
@@ -66,6 +77,28 @@ window controls. Reference: the Settings window; rules and helpers in
 A pull-down is exactly as wide as its longest row. Never guess a width (`set_min_width(180.0)`): use
 `kit::fitted_menu` (or `kit::menu_fit`), and look at the opened menu in a picture before shipping.
 Details: [UI style](docs/agent-guides/ui-style.md).
+
+## Root causes, no patchwork
+
+Applies when you fix a bug, act on code-review comments, or change existing code in any way.
+
+Never patch the symptom. Find the root cause (the place where the wrong model, wrong assumption or
+missing rule lives) and change it there. The result must read as if the code had been designed that
+way from the start, with no trace of the bug or of your fix.
+
+- Trace the failure back to where the bad value or state is first produced before editing. A fix
+  downstream of that point is a patch.
+- No special cases, guards, flags, retries, clamps or one-off `if` branches whose only job is to hide
+  a bad result. No "temporary" workarounds, no `// workaround for ...` comments.
+- If the cause is in shared code (a helper, a type, another module), fix it there and update every
+  caller, even when the diff grows.
+- Reshape the surrounding code when the right design needs it: rename, move, delete what became dead,
+  update docs and tests. Do not bolt a patch onto the old shape.
+- Add a test that fails on the root cause, not only on the reported symptom.
+- Review comments are usually symptoms: ask what in the design allowed the problem, fix that, and
+  check for the same flaw elsewhere.
+- If you cannot find or fix the root cause (too large, needs a user decision), say so and ask. Never
+  ship a patch presented as the fix.
 
 ## Changelog
 
@@ -124,6 +157,13 @@ unit-test wall-clock, so it sits behind the `corpus` cargo feature, off by defau
 - `cargo test` — fast suite, corpus excluded.
 - `cargo test --features corpus` — full suite including the Pine corpus.
 
+Iterating on one change: the library is a single crate, so with incremental compilation off (the
+default here, for disk) every edit recompiles all of it: 5+ min on a loaded machine. In the one
+worktree you are iterating in, run `CARGO_INCREMENTAL=1 cargo test --lib <filter>`: the same edit
+rebuilt in about 2 min (measured on a loaded machine; the first build is slower). Use `cargo check`
+while you only need the compiler's answer, and trim the caches when done
+(`tools/clean-worktrees.sh --trim-incremental`).
+
 ## Worktrees and build space
 
 Each worktree builds into its own `target/` (5 GB fresh, growing every rebuild; cargo never deletes
@@ -135,7 +175,12 @@ old output). Finished worktrees are where the disk goes.
 - Remove a worktree when its pull request merges. `tools/clean-worktrees.sh` lists every worktree and
   whether it can go; `--remove-merged` removes finished ones, never one with uncommitted changes,
   newer commits, no pull request, or a process running from it. `--clean-idle DAYS` deletes only the
-  `target/debug` of worktrees not built for that long.
+  `target/debug` of worktrees not built for that long. `--trim-incremental` deletes only the
+  `incremental/` caches, which were about 60% of 219 GB across 19 worktrees; run it when you finish
+  a task, and any time the disk is under ~50 GB free.
+- Incremental compilation is the main disk cost when several worktrees are live. Keep it off by
+  default (`[build] incremental = false` in `~/.cargo/config.toml`) and turn it on with
+  `CARGO_INCREMENTAL=1` only in the one worktree you are iterating in.
 - `[profile.dev]` keeps line tables but drops variable-level debug info (about a third of a fresh
   `target/`; the incremental cache is the rest of the growth). To inspect your code's variables in
   lldb, build with `CARGO_PROFILE_DEV_DEBUG=true` into a separate `CARGO_TARGET_DIR`.
@@ -145,6 +190,7 @@ old output). Finished worktrees are where the disk goes.
 ## Deeper references
 
 - [Architecture](docs/architecture.md) — module map, data flow.
+- [Localization](docs/localization.md) — `tr!` macros, `.po` catalogs, the language setting, the pseudo-locale, adding a language, what is not done.
 - [Chart types](docs/chart-types.md) — construction rules, Pine semantics.
 - [Chart cursors](docs/chart-cursors.md) — the cursor modes and the capability table that decides what each shows.
 - [Chart navigation](docs/chart-navigation.md) — viewport, pan/axis gestures, older history, unverified items.
@@ -155,9 +201,11 @@ old output). Finished worktrees are where the disk goes.
 - [Drawing tools](docs/drawing-tools.md) — tools, geometry, verified vs inferred behavior, limits.
 - [Pine execution-model audit](docs/reviews/pine-execution-model-audit.md) — engine vs TradingView's execution model: findings, stacked fixes, what is deferred.
 - [Pine Logs](docs/pine-logs.md) — `log.*()` messages: sink, limits, batches, TradingView verification.
+- [`ta.*` against TradingView](docs/pine-ta-parity.md) — the true-range family: what is compared, what still differs (conditional `ta.supertrend`, `ta.sar`), how to probe.
 - [Portfolio cards](docs/portfolio-cards.md) — card design, known gaps.
 - [New-tab page](docs/new-tab-page.md) — the blank tab: search launcher, tabs, sparklines, animated backdrop.
 - [README hero GIF](tools/readme-gif/README.md): how the animated picture is recorded from the real app, and when to retake it.
+- [Tutorial videos](tools/tutorial-video/README.md): narrated screen-capture tutorials from the real app (the Pine debugger one), how to make or retake one.
 - [Chart snapshots](docs/snapshots.md) — camera menu, shared renderer, Screenshot Studio (Select portion, composer, backdrops, remembered look), hosted sharing via providers (ImgBB, your own host, adding one), privacy.
 - [MCP implementation](docs/mcp-implementation.md) and [remaining work](docs/mcp-remaining-work.md).
 - Also in Required reading, with details and what is verified versus decided:

@@ -1,15 +1,18 @@
 //! The app's Settings window: a sidebar of badge-and-title rows beside the selected page —
-//! Appearance, Alpaca, CoinMarketCap, Notifications (how alerts are delivered, and the
+//! Appearance, Alpaca, Oanda, CoinMarketCap, Notifications (how alerts are delivered, and the
 //! background agent's health), Webhooks, Storage (the cache) and About.
 //!
 //! A pure view: it reads settings values and returns `SettingsAction`s for the host.
 
+use crate::i18n::{tr, tr_n};
 use crate::model::alert::{
     AlertNotificationPermission, AlertNotificationSettings, AlertRuntimeHealth, AlertServiceState,
 };
 use crate::model::mcp::McpAction;
 use crate::platform;
-use crate::service::keychain::api_keys::{AlpacaCredentialsStore, CoinMarketCapKeyStore};
+use crate::service::keychain::api_keys::{
+    AlpacaCredentialsStore, CoinMarketCapKeyStore, OandaCredentialsStore,
+};
 use crate::ui::icons::{self, Icon};
 use crate::ui::kit::{Tone, time_text::relative_time};
 use crate::ui::settings::api_keys::{self, ApiKeysState};
@@ -33,6 +36,7 @@ pub enum SettingsSection {
     Appearance,
     PineStudio,
     Alpaca,
+    Oanda,
     Brokers,
     CoinMarketCap,
     Ai,
@@ -47,10 +51,11 @@ pub enum SettingsSection {
 }
 
 impl SettingsSection {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Appearance,
         Self::PineStudio,
         Self::Alpaca,
+        Self::Oanda,
         Self::Brokers,
         Self::CoinMarketCap,
         Self::Ai,
@@ -73,20 +78,21 @@ impl SettingsSection {
 
     pub fn title(self) -> &'static str {
         match self {
-            Self::Appearance => "Appearance",
-            Self::PineStudio => "Pine Studio",
+            Self::Appearance => tr!("Appearance"),
+            Self::PineStudio => tr!("Pine Studio"),
             Self::Alpaca => "Alpaca",
-            Self::Brokers => "Brokers",
+            Self::Oanda => "Oanda",
+            Self::Brokers => tr!("Brokers"),
             Self::CoinMarketCap => "CoinMarketCap",
-            Self::Ai => "AI Assistant",
-            Self::Notifications => "Notifications",
-            Self::Webhooks => "Webhooks",
-            Self::Snapshots => "Snapshots",
-            Self::Network => "Network",
-            Self::Storage => "Storage",
-            Self::Mcp => "MCP Server",
-            Self::Sync => "iCloud Sync",
-            Self::About => "About",
+            Self::Ai => tr!("AI Assistant"),
+            Self::Notifications => tr!("Notifications"),
+            Self::Webhooks => tr!("Webhooks"),
+            Self::Snapshots => tr!("Snapshots"),
+            Self::Network => tr!("Network"),
+            Self::Storage => tr!("Storage"),
+            Self::Mcp => tr!("MCP Server"),
+            Self::Sync => tr!("iCloud Sync"),
+            Self::About => tr!("About"),
         }
     }
 
@@ -96,6 +102,7 @@ impl SettingsSection {
             Self::Appearance => Color32::from_rgb(94, 92, 230),
             Self::PineStudio => Color32::from_rgb(172, 142, 104),
             Self::Alpaca => Color32::from_rgb(255, 159, 10),
+            Self::Oanda => Color32::from_rgb(0, 166, 81),
             Self::Brokers => Color32::from_rgb(255, 112, 67),
             Self::CoinMarketCap => Color32::from_rgb(10, 132, 255),
             Self::Ai => Color32::from_rgb(255, 214, 10),
@@ -116,6 +123,7 @@ impl SettingsSection {
             Self::Appearance => "appearance",
             Self::PineStudio => "pinestudio",
             Self::Alpaca => "alpaca",
+            Self::Oanda => "oanda",
             Self::Brokers => "brokers",
             Self::CoinMarketCap => "coinmarketcap",
             Self::Ai => "ai",
@@ -140,6 +148,10 @@ pub enum SettingsAction {
     SetTheme(crate::ui::theme::AppTheme),
     /// A tab title style on the Appearance page was picked (or restored to the default).
     SetTabTitleStyle(crate::model::tab::title::TabTitleStyle),
+    /// A language on the Appearance page was picked; it applies at the next start.
+    SetLanguage(crate::i18n::Preference),
+    /// The language prompt's Restart Now: quit and open the app again.
+    Restart,
     /// A switch on the Notifications page changed: the whole new settings value.
     UpdateNotifications(AlertNotificationSettings),
     /// The paper-trading card on the Notifications page changed.
@@ -174,6 +186,8 @@ pub struct SettingsInput<'a> {
     pub trading_hub: &'a std::sync::Arc<crate::host::trading::TradingHub>,
     pub editor_themes: &'a crate::host::editor_theme::EditorThemeHost,
     pub tab_title_style: crate::model::tab::title::TabTitleStyle,
+    /// The language the next start uses: the saved choice.
+    pub language: crate::i18n::Preference,
     pub now_ms: i64,
 }
 
@@ -189,6 +203,8 @@ pub struct SettingsState {
     pub mcp: McpSettingsState,
     pub snapshots: crate::ui::settings::snapshots::SnapshotsState,
     pub pine_studio: crate::ui::settings::pine_studio::PineStudioState,
+    /// The question "restart to change the language?" is waiting for an answer.
+    pub restart_prompt: bool,
 }
 
 // MARK: Pure labels
@@ -196,12 +212,12 @@ pub struct SettingsState {
 /// The background agent's state in words.
 pub fn service_label(state: AlertServiceState) -> &'static str {
     match state {
-        AlertServiceState::Enabled => "Running in background",
-        AlertServiceState::RequiresApproval => "Needs approval in Login Items",
-        AlertServiceState::Disabled => "Foreground only",
-        AlertServiceState::NotFound => "Agent not embedded",
-        AlertServiceState::Failed => "Registration failed",
-        AlertServiceState::Unavailable => "Unavailable",
+        AlertServiceState::Enabled => tr!("Running in background"),
+        AlertServiceState::RequiresApproval => tr!("Needs approval in Login Items"),
+        AlertServiceState::Disabled => tr!("Foreground only"),
+        AlertServiceState::NotFound => tr!("Agent not embedded"),
+        AlertServiceState::Failed => tr!("Registration failed"),
+        AlertServiceState::Unavailable => tr!("Unavailable"),
     }
 }
 
@@ -216,12 +232,12 @@ pub fn service_tone(state: AlertServiceState) -> Tone {
 
 pub fn permission_label(permission: AlertNotificationPermission) -> &'static str {
     match permission {
-        AlertNotificationPermission::Authorized => "Authorized",
-        AlertNotificationPermission::Provisional => "Provisional",
-        AlertNotificationPermission::Ephemeral => "Ephemeral",
-        AlertNotificationPermission::Denied => "Denied",
-        AlertNotificationPermission::NotDetermined => "Not requested",
-        AlertNotificationPermission::Unknown => "Unknown",
+        AlertNotificationPermission::Authorized => tr!("Authorized"),
+        AlertNotificationPermission::Provisional => tr!("Provisional"),
+        AlertNotificationPermission::Ephemeral => tr!("Ephemeral"),
+        AlertNotificationPermission::Denied => tr!("Denied"),
+        AlertNotificationPermission::NotDetermined => tr!("Not requested"),
+        AlertNotificationPermission::Unknown => tr!("Unknown"),
     }
 }
 
@@ -241,16 +257,17 @@ pub fn permission_tone(permission: AlertNotificationPermission) -> Tone {
 pub fn provider_label(last_error: Option<&str>, has_quote: bool) -> String {
     match last_error {
         Some(error) => error.to_owned(),
-        None if has_quote => "Healthy".to_owned(),
-        None => "Waiting for data".to_owned(),
+        None if has_quote => tr!("Healthy").to_owned(),
+        None => tr!("Waiting for data").to_owned(),
     }
 }
 
 /// "3 unreconciled data gaps".
 pub fn gaps_title(count: usize) -> String {
-    format!(
-        "{count} unreconciled data {}",
-        if count == 1 { "gap" } else { "gaps" }
+    tr_n!(
+        count,
+        "{count} unreconciled data gap",
+        "{count} unreconciled data gaps"
     )
 }
 
@@ -280,22 +297,22 @@ impl NotificationSwitch {
 
     pub fn title(self) -> &'static str {
         match self {
-            Self::Delivery => "Price Alert Delivery",
-            Self::Sound => "Sound",
-            Self::InAppBanners => "In-App Banners",
-            Self::MacosNotifications => "macOS Notifications",
+            Self::Delivery => tr!("Price Alert Delivery"),
+            Self::Sound => tr!("Sound"),
+            Self::InAppBanners => tr!("In-App Banners"),
+            Self::MacosNotifications => tr!("macOS Notifications"),
         }
     }
 
     pub fn hint(self) -> &'static str {
         match self {
             Self::Delivery => {
-                "Evaluate armed alerts and deliver them when their conditions are met."
+                tr!("Evaluate armed alerts and deliver them when their conditions are met.")
             }
-            Self::Sound => "Play an alert sound when a notification is delivered.",
-            Self::InAppBanners => "Show alerts inside DegenView while the app is open.",
+            Self::Sound => tr!("Play an alert sound when a notification is delivered."),
+            Self::InAppBanners => tr!("Show alerts inside DegenView while the app is open."),
             Self::MacosNotifications => {
-                "Send alerts through Notification Center, including in the background."
+                tr!("Send alerts through Notification Center, including in the background.")
             }
         }
     }
@@ -336,6 +353,7 @@ impl SettingsSection {
             Self::Appearance => Icon::Paintbrush,
             Self::PineStudio => Icon::AngleBrackets,
             Self::Alpaca => Icon::ChartLine,
+            Self::Oanda => Icon::Banknote,
             Self::Brokers => Icon::ArrowLeftRight,
             Self::CoinMarketCap => Icon::Gauge,
             Self::Ai => Icon::Sparkles,
@@ -415,7 +433,7 @@ pub fn show(
             page_shell(
                 &mut page,
                 section,
-                "Choose how DegenView looks across every window and chart.",
+                tr!("Choose how DegenView looks across every window and chart."),
                 |ui| {
                     if let Some(theme) =
                         crate::ui::settings::appearance::body(ui, crate::ui::theme::choice())
@@ -427,6 +445,13 @@ pub fn show(
                         crate::ui::settings::appearance::tabs(ui, input.tab_title_style)
                     {
                         actions.push(SettingsAction::SetTabTitleStyle(style));
+                    }
+                    if let Some(language) =
+                        crate::ui::settings::appearance::language(ui, input.language)
+                    {
+                        actions.push(SettingsAction::SetLanguage(language));
+                        // Going back to the language in use asks nothing.
+                        state.restart_prompt = language != crate::i18n::preference();
                     }
                 },
             );
@@ -444,15 +469,26 @@ pub fn show(
             page_shell(
                 &mut page,
                 section,
-                "Connect Alpaca to chart US stocks and ETFs in DegenView.",
+                tr!("Connect Alpaca to chart US stocks and ETFs in DegenView."),
                 |ui| api_keys::alpaca_body(ui, &mut state.api_keys, store),
+            );
+        }
+        SettingsSection::Oanda => {
+            let store = OandaCredentialsStore::shared();
+            page_shell(
+                &mut page,
+                section,
+                tr!("Connect Oanda to chart forex, metals and index CFDs in DegenView."),
+                |ui| api_keys::oanda_body(ui, &mut state.api_keys, store),
             );
         }
         SettingsSection::Brokers => {
             page_shell(
                 &mut page,
                 section,
-                "Connect a broker to trade for real from your charts. Paper trading is separate.",
+                tr!(
+                    "Connect a broker to trade for real from your charts. Paper trading is separate."
+                ),
                 |ui| {
                     if let Some(prefs) = crate::ui::settings::brokers::body(
                         ui,
@@ -469,7 +505,7 @@ pub fn show(
             page_shell(
                 &mut page,
                 section,
-                "Market sentiment charts, with optional higher API rate limits.",
+                tr!("Market sentiment charts, with optional higher API rate limits."),
                 |ui| api_keys::coinmarketcap_body(ui, &mut state.api_keys, store),
             );
         }
@@ -478,7 +514,9 @@ pub fn show(
             page_shell(
                 &mut page,
                 section,
-                "Describe a change and an AI model edits your Pine script, using your own API key.",
+                tr!(
+                    "Describe a change and an AI model edits your Pine script, using your own API key."
+                ),
                 |ui| crate::ui::settings::ai::body(ui, &mut state.ai, &input.ai, &mut ai_actions),
             );
             actions.extend(ai_actions.into_iter().map(SettingsAction::Ai));
@@ -488,7 +526,9 @@ pub fn show(
             page_shell(
                 &mut page,
                 section,
-                "Route DegenView's connections through a proxy, such as the one your VPN or network sets.",
+                tr!(
+                    "Route DegenView's connections through a proxy, such as the one your VPN or network sets."
+                ),
                 |ui| {
                     crate::ui::settings::network::body(
                         ui,
@@ -504,7 +544,7 @@ pub fn show(
             page_shell(
                 &mut page,
                 section,
-                "Choose how DegenView delivers price alerts and check on background delivery.",
+                tr!("Choose how DegenView delivers price alerts and check on background delivery."),
                 |ui| notifications_page(ui, input, &mut actions),
             );
         }
@@ -513,19 +553,16 @@ pub fn show(
             page_shell(
                 &mut page,
                 section,
-                "Logos and lookups saved on this computer so they appear instantly.",
+                tr!("Logos and lookups saved on this computer so they appear instantly."),
                 |ui| storage::body(ui, &mut state.storage, &mut storage_actions),
             );
             actions.extend(storage_actions.into_iter().map(SettingsAction::Storage));
         }
         SettingsSection::Mcp => {
             let mut mcp_actions = Vec::new();
-            page_shell(
-                &mut page,
-                section,
-                "Let AI assistants and automation on this Mac inspect DegenView, with permissions you control.",
-                |ui| mcp::body(ui, &mut state.mcp, &input.mcp, &mut mcp_actions),
-            );
+            page_shell(&mut page, section, crate::platform::mcp_page_hint(), |ui| {
+                mcp::body(ui, &mut state.mcp, &input.mcp, &mut mcp_actions)
+            });
             actions.extend(mcp_actions.into_iter().map(SettingsAction::Mcp));
         }
         SettingsSection::Snapshots => {
@@ -533,7 +570,7 @@ pub fn show(
             page_shell(
                 &mut page,
                 section,
-                "Share a picture of a chart, and choose what it shows.",
+                tr!("Share a picture of a chart, and choose what it shows."),
                 |ui| {
                     crate::ui::settings::snapshots::body(
                         ui,
@@ -558,7 +595,9 @@ pub fn show(
             page_shell(
                 &mut page,
                 section,
-                "Keep your watchlists, layouts, drawings, templates, scripts, portfolios and paper trading the same on every Mac.",
+                tr!(
+                    "Keep your watchlists, layouts, drawings, templates, scripts, portfolios and paper trading the same on every Mac."
+                ),
                 |ui| crate::ui::settings::sync::body(ui, input.sync, input.now_ms),
             );
         }
@@ -567,13 +606,49 @@ pub fn show(
             page_shell(
                 &mut page,
                 section,
-                "Send alert messages to external HTTP endpoints, such as a trading bot or a chat channel.",
+                tr!(
+                    "Send alert messages to external HTTP endpoints, such as a trading bot or a chat channel."
+                ),
                 |ui| webhook_actions = settings::body(ui, &mut state.webhooks, &input.webhooks),
             );
             actions.extend(webhook_actions.into_iter().map(SettingsAction::Webhook));
         }
     }
+    ask_to_restart(ui.ctx(), state, &mut actions);
     actions
+}
+
+/// After a language is picked: offers to restart now, since the language applies at the next start.
+/// "Later" leaves the choice saved; the language card does not ask again.
+fn ask_to_restart(
+    ctx: &egui::Context,
+    state: &mut SettingsState,
+    actions: &mut Vec<SettingsAction>,
+) {
+    if !state.restart_prompt {
+        return;
+    }
+    let outcome = kit::alert(
+        ctx,
+        egui::Id::new("settings-language-restart"),
+        &kit::Alert {
+            icon: Icon::Cycle,
+            tint: kit::ORANGE,
+            title: tr!("Restart to change the language?"),
+            message: tr!("DegenView will close and reopen."),
+            accept: tr!("Restart Now"),
+            dismiss: tr!("Later"),
+            cautious: false,
+        },
+    );
+    match outcome {
+        Some(kit::ConfirmOutcome::Confirmed) => {
+            state.restart_prompt = false;
+            actions.push(SettingsAction::Restart);
+        }
+        Some(kit::ConfirmOutcome::Cancelled) => state.restart_prompt = false,
+        None => {}
+    }
 }
 
 /// The rows of icon-and-title sections: flat, the selected one lightly filled.
@@ -663,26 +738,21 @@ pub(in crate::ui) fn page_shell(
 }
 
 /// `SheetHeader`, with the section's picture in place of an icon badge: the picture, the page
-/// title and a one-line description.
+/// title and its description, which wraps (a longer language takes more lines, and the header
+/// grows to fit them).
 pub(in crate::ui) fn page_header(ui: &mut egui::Ui, section: SettingsSection, subtitle: &str) {
-    let title = section.title();
-    let (row, _) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width(), crate::ui::settings::art::SIZE.y),
-        Sense::hover(),
-    );
-    let art = Rect::from_min_size(row.min, crate::ui::settings::art::SIZE);
-    crate::ui::settings::art::paint(ui, art, section);
-    let left = art.right() + 16.0;
-    let width = row.right() - left;
+    let art_size = crate::ui::settings::art::SIZE;
+    let left_gap = 16.0;
+    let width = ui.available_width() - art_size.x - left_gap;
     let title = kit::galley(
         ui,
-        title,
+        section.title(),
         kit::size::TITLE2 + 3.0,
         kit::SEMIBOLD,
         theme::text_primary(),
         width,
     );
-    let detail = kit::galley(
+    let detail = kit::paragraph(
         ui,
         subtitle,
         kit::size::SUBHEADLINE + 1.0,
@@ -690,7 +760,18 @@ pub(in crate::ui) fn page_header(ui: &mut egui::Ui, section: SettingsSection, su
         theme::text_secondary(),
         width,
     );
-    let top = row.center().y - (title.size().y + 2.0 + detail.size().y) / 2.0;
+    let text_height = title.size().y + 2.0 + detail.size().y;
+    let (row, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), art_size.y.max(text_height)),
+        Sense::hover(),
+    );
+    let art = Rect::from_min_size(
+        Pos2::new(row.min.x, row.center().y - art_size.y / 2.0),
+        art_size,
+    );
+    crate::ui::settings::art::paint(ui, art, section);
+    let left = art.right() + left_gap;
+    let top = row.center().y - text_height / 2.0;
     let title_height = title.size().y;
     ui.painter()
         .galley(Pos2::new(left, top), title, theme::text_primary());
@@ -752,7 +833,7 @@ impl NotificationSwitch {
 }
 
 fn notifications_page(ui: &mut egui::Ui, input: &SettingsInput, actions: &mut Vec<SettingsAction>) {
-    section(ui, "Delivery", None, |ui| {
+    section(ui, tr!("Delivery"), None, |ui| {
         for (index, switch) in NotificationSwitch::available().enumerate() {
             if index > 0 {
                 ui.add_space(10.0);
@@ -774,12 +855,12 @@ fn notifications_page(ui: &mut egui::Ui, input: &SettingsInput, actions: &mut Ve
         }
     });
 
-    section(ui, "Paper trading", None, |ui| {
+    section(ui, tr!("Paper trading"), None, |ui| {
         card::card(
             ui,
             Icon::SpeakerWave,
-            "Fill sound",
-            Some("Play a sound when a paper order is filled."),
+            tr!("Fill sound"),
+            Some(tr!("Play a sound when a paper order is filled.")),
             |ui| {
                 let prefs = input.trading_hub.paper_prefs();
                 let mut value = prefs.fill_sound;
@@ -798,12 +879,12 @@ fn notifications_page(ui: &mut egui::Ui, input: &SettingsInput, actions: &mut Ve
     }
     section(
         ui,
-        "Background agent",
-        Some("Keeps alerts evaluating while DegenView is closed."),
+        tr!("Background agent"),
+        Some(tr!("Keeps alerts evaluating while DegenView is closed.")),
         |ui| {
             let health = input.health;
             card(ui, |ui| {
-                row(ui, "Status", |ui| {
+                row(ui, tr!("Status"), |ui| {
                     kit::status_badge(
                         ui,
                         service_label(health.service_state),
@@ -811,7 +892,7 @@ fn notifications_page(ui: &mut egui::Ui, input: &SettingsInput, actions: &mut Ve
                     );
                 });
                 kit::divider(ui);
-                row(ui, "Notification permission", |ui| {
+                row(ui, tr!("Notification permission"), |ui| {
                     kit::status_badge(
                         ui,
                         permission_label(health.notification_permission),
@@ -820,7 +901,7 @@ fn notifications_page(ui: &mut egui::Ui, input: &SettingsInput, actions: &mut Ve
                 });
                 if let Some(heartbeat) = health.heartbeat_ms {
                     kit::divider(ui);
-                    row(ui, "Last heartbeat", |ui| {
+                    row(ui, tr!("Last heartbeat"), |ui| {
                         ui.label(kit::text(
                             relative_time(input.now_ms, heartbeat),
                             kit::size::BODY,
@@ -867,21 +948,21 @@ fn notifications_page(ui: &mut egui::Ui, input: &SettingsInput, actions: &mut Ve
                     AlertServiceState::NotFound | AlertServiceState::Unavailable
                 );
                 if has_agent {
-                    if kit::push_button(ui, None, "Retry Registration", true).clicked() {
+                    if kit::push_button(ui, None, tr!("Retry Registration"), true).clicked() {
                         actions.push(SettingsAction::RetryRegistration);
                     }
-                    if kit::push_button(ui, None, "Login Items Settings", true).clicked() {
+                    if kit::push_button(ui, None, tr!("Login Items Settings"), true).clicked() {
                         actions.push(SettingsAction::OpenLoginItems);
                     }
                 }
-                if kit::push_button(ui, None, "Notification Settings", true).clicked() {
+                if kit::push_button(ui, None, tr!("Notification Settings"), true).clicked() {
                     actions.push(SettingsAction::OpenNotificationSettings);
                 }
             });
             ui.add_space(10.0);
             ui.add(
                 egui::Label::new(kit::text(
-                    "If the background item is disabled or unavailable, alerts keep evaluating while DegenView is open.",
+                    tr!("If the background item is disabled or unavailable, alerts keep evaluating while DegenView is open."),
                     kit::size::CAPTION + 0.5,
                     kit::REGULAR,
                     theme::text_secondary(),
@@ -1027,6 +1108,177 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The Appearance page with its language card in `locale`, drawn until it settles: the choice
+    /// the language card made (none, nothing is clicked), and the last frame.
+    fn draw_appearance_page(
+        screen: &mut crate::ui::render_tests::Screen,
+        locale: crate::i18n::Locale,
+    ) -> (Option<crate::i18n::Preference>, egui::FullOutput) {
+        use crate::i18n::{Preference, with_locale};
+        let mut chosen = None;
+        let mut last = None;
+        with_locale(locale, || {
+            for _ in 0..3 {
+                last = Some(screen.run(Vec::new(), |ui| {
+                    let mut page = ui.new_child(egui::UiBuilder::new().max_rect(ui.max_rect()));
+                    page_shell(
+                        &mut page,
+                        SettingsSection::Appearance,
+                        crate::i18n::tr!(
+                            "Choose how DegenView looks across every window and chart."
+                        ),
+                        |ui| {
+                            crate::ui::settings::appearance::body(ui, theme::choice());
+                            ui.add_space(22.0);
+                            crate::ui::settings::appearance::tabs(
+                                ui,
+                                crate::model::tab::title::TabTitleStyle::Full,
+                            );
+                            chosen = crate::ui::settings::appearance::language(
+                                ui,
+                                Preference::Fixed(locale),
+                            );
+                        },
+                    );
+                }));
+            }
+        });
+        (chosen, last.expect("a frame"))
+    }
+
+    /// The Appearance page in the pseudo-locale, with its language card: every word of it is put
+    /// through `tr!`, so none shows without accents and brackets, and the longer text (40% more)
+    /// wraps or makes room, and is never cut.
+    #[test]
+    fn the_appearance_page_draws_in_the_pseudo_locale() {
+        use crate::i18n::{Locale, with_locale};
+        use crate::ui::render_tests::{Screen, gallery_dir};
+        let _theme = crate::ui::theme::RestoreDefaultTheme;
+        // Taller than the window, so the language card at the foot of the page is in the picture.
+        let mut screen = Screen::new(WINDOW_SIZE - Vec2::new(SIDEBAR_WIDTH, -320.0));
+        theme::apply(&screen.ctx, crate::ui::theme::AppTheme::Dark);
+        let (chosen, last) = draw_appearance_page(&mut screen, Locale::PSEUDO);
+        with_locale(Locale::PSEUDO, || {
+            assert!(SettingsSection::Appearance.title().starts_with('['));
+        });
+        // Nothing was clicked, and nothing was cut.
+        assert_eq!(chosen, None);
+        assert_eq!(Screen::truncated_text(&last), Vec::<String>::new());
+        if gallery_dir().is_some() {
+            screen.save("settings-appearance-pseudo", last);
+        }
+    }
+
+    /// The same page in English shows every word too: the check that finds a label cut in a longer
+    /// language also finds one cut in the language the interface is written in.
+    #[test]
+    fn the_appearance_page_shows_every_word_in_english() {
+        use crate::i18n::Locale;
+        use crate::ui::render_tests::Screen;
+        let _theme = crate::ui::theme::RestoreDefaultTheme;
+        let mut screen = Screen::new(WINDOW_SIZE - Vec2::new(SIDEBAR_WIDTH, -320.0));
+        theme::apply(&screen.ctx, crate::ui::theme::AppTheme::Dark);
+        let (_, last) = draw_appearance_page(&mut screen, Locale::ENGLISH);
+        assert_eq!(Screen::truncated_text(&last), Vec::<String>::new());
+    }
+
+    /// One frame of the restart question, with `events` arriving in it.
+    fn restart_question_frame(
+        ctx: &egui::Context,
+        state: &mut SettingsState,
+        time: f64,
+        events: Vec<egui::Event>,
+    ) -> Vec<SettingsAction> {
+        let raw = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 700.0))),
+            time: Some(time),
+            events,
+            ..Default::default()
+        };
+        let mut actions = Vec::new();
+        let mut output = ctx.run_ui(raw, |ui| ask_to_restart(ui.ctx(), state, &mut actions));
+        // Nothing paints the textures this frame asked for.
+        output.textures_delta.clear();
+        actions
+    }
+
+    fn key_press(pressed: bool) -> egui::Event {
+        egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: Some(egui::Key::Escape),
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn nothing_is_asked_until_a_language_is_picked() {
+        let ctx = egui::Context::default();
+        let mut state = SettingsState::default();
+        for step in 0..3 {
+            assert!(
+                restart_question_frame(&ctx, &mut state, f64::from(step) * 0.1, vec![]).is_empty()
+            );
+        }
+        assert!(!state.restart_prompt);
+    }
+
+    #[test]
+    fn later_closes_the_question_and_asks_for_no_restart() {
+        let ctx = egui::Context::default();
+        let mut state = SettingsState {
+            restart_prompt: true,
+            ..SettingsState::default()
+        };
+        for step in 0..3 {
+            let actions = restart_question_frame(&ctx, &mut state, f64::from(step) * 0.1, vec![]);
+            assert!(actions.is_empty());
+        }
+        assert!(state.restart_prompt, "it waits for an answer");
+        // Escape dismisses the dialog.
+        let mut actions = restart_question_frame(&ctx, &mut state, 0.4, vec![key_press(true)]);
+        actions.extend(restart_question_frame(
+            &ctx,
+            &mut state,
+            0.5,
+            vec![key_press(false)],
+        ));
+        assert!(actions.is_empty(), "{actions:?}");
+        assert!(!state.restart_prompt);
+    }
+
+    #[test]
+    fn restart_now_asks_the_host_to_restart() {
+        let ctx = egui::Context::default();
+        let mut state = SettingsState {
+            restart_prompt: true,
+            ..SettingsState::default()
+        };
+        for step in 0..3 {
+            restart_question_frame(&ctx, &mut state, f64::from(step) * 0.1, vec![]);
+        }
+        let enter = |pressed| egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: Some(egui::Key::Enter),
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let mut actions = restart_question_frame(&ctx, &mut state, 0.4, vec![enter(true)]);
+        actions.extend(restart_question_frame(
+            &ctx,
+            &mut state,
+            0.5,
+            vec![enter(false)],
+        ));
+        assert!(
+            matches!(actions.as_slice(), [SettingsAction::Restart]),
+            "{actions:?}"
+        );
+        assert!(!state.restart_prompt);
     }
 
     #[test]

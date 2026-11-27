@@ -44,7 +44,9 @@ fn stub_search(source: DataSource, query: &str) -> Result<Vec<SearchResult>, Pro
             pair(Binance, "ETHBTC", "ETH", "BTC"),
         ]),
         (Coinbase, "eth") => Ok(vec![pair(Coinbase, "ETH-USD", "ETH", "USD")]),
-        (Alpaca, _) => Err(ProviderError::MissingKey),
+        (Alpaca, _) => Err(ProviderError::MissingKey(Alpaca)),
+        (DataSource::Oanda, "eurusd") => Ok(vec![pair(DataSource::Oanda, "EUR_USD", "EUR", "USD")]),
+        (DataSource::Oanda, _) => Err(ProviderError::MissingKey(DataSource::Oanda)),
         (DataSource::Polymarket, "fed") => Ok(vec![
             chance(DataSource::Polymarket, "Fed decision", "Cut", Some(0.2)),
             chance(DataSource::Polymarket, "Fed decision", "Hold", Some(0.7)),
@@ -438,6 +440,10 @@ fn tab_walks_the_market_tabs_and_each_narrows_the_list() {
     assert_eq!(rig.picker.scope, Scope::Crypto);
     assert!(!rig.names().iter().any(|name| name.contains("Grayscale")));
     rig.key(Key::Tab, Modifiers::NONE);
+    rig.settle();
+    assert_eq!(rig.picker.scope, Scope::Forex);
+    assert!(!rig.names().iter().any(|name| name.contains("Grayscale")));
+    rig.key(Key::Tab, Modifiers::NONE);
     assert_eq!(rig.picker.scope, Scope::Predictions);
     rig.key(Key::Tab, Modifiers::NONE);
     assert_eq!(rig.picker.scope, Scope::Dashboards);
@@ -466,34 +472,126 @@ fn a_stock_needs_an_alpaca_key_before_it_opens() {
     let output = rig.frame(vec![press(Key::Enter, Modifiers::NONE)]);
     assert!(output.is_none());
     assert!(rig.picker.is_open());
-    assert!(rig.picker.needs_alpaca);
+    assert_eq!(
+        rig.picker.pick_needs_credentials,
+        Some(SettingsPage::Alpaca)
+    );
+}
+
+#[test]
+fn opening_an_oanda_market_without_credentials_prompts_for_oanda_settings() {
+    let mut rig = Rig::new(1100.0, "eurusd");
+    assert_eq!(rig.names(), ["EUR_USD"]);
+    assert!(
+        rig.frame(vec![press(Key::Enter, Modifiers::NONE)])
+            .is_none()
+    );
+    let lookup = rig.picker.lookup();
+    let listing = rig.picker.listing(&rig.screen.ctx);
+    let notice = rig.picker.notice(&listing, &lookup).expect("setup prompt");
+    assert_eq!(notice.settings, Some(SettingsPage::Oanda));
 }
 
 #[test]
 fn a_missing_alpaca_key_is_a_card_with_a_settings_button_not_a_hint() {
     let mut rig = Rig::new(1100.0, "eth");
     let ctx = rig.screen.ctx.clone();
+    let lookup = rig.picker.lookup();
     let listing = rig.picker.listing(&ctx);
     let notice = rig
         .picker
-        .notice(&listing)
+        .notice(&listing, &lookup)
         .expect("stocks cannot be searched");
     assert_eq!(notice.title, "Stocks need an Alpaca key");
-    assert!(notice.settings);
+    assert_eq!(notice.settings, Some(SettingsPage::Alpaca));
     // Another failure of the stock search has nothing to set up.
     let mut listing = rig.picker.listing(&ctx);
     listing.errors = vec![(
         DataSource::Alpaca,
         ProviderError::from(http::Error::Network("timed out".to_owned())),
     )];
-    let notice = rig.picker.notice(&listing).expect("a failure");
+    let notice = rig.picker.notice(&listing, &lookup).expect("a failure");
     assert_eq!(notice.title, "Stocks could not be searched");
-    assert!(!notice.settings);
+    assert_eq!(notice.settings, None);
     // Nothing to say while stocks are not in the scope.
     rig.picker.set_scope(Scope::Crypto);
     rig.settle();
+    let lookup = rig.picker.lookup();
     let listing = rig.picker.listing(&ctx);
-    assert!(rig.picker.notice(&listing).is_none());
+    assert!(rig.picker.notice(&listing, &lookup).is_none());
+}
+
+#[test]
+fn a_missing_oanda_login_prompts_only_where_oanda_is_the_venue() {
+    // On the broad All tab the missing Oanda login is not the empty state: the ordinary
+    // no-results message stays, naming every venue searched.
+    let mut rig = Rig::new(1100.0, "");
+    rig.type_text("zzz");
+    let shown = texts(&mut rig);
+    assert!(
+        shown.iter().any(|text| text
+            == "Nothing matches “zzz”. Searched: Binance, Coinbase, OKX, Kraken, Bybit, Gate.io, MEXC, DEXScreener, CoinGecko, Alpaca, and Oanda."),
+        "{shown:?}"
+    );
+    assert!(
+        !shown
+            .iter()
+            .any(|text| text == "Oanda could not be searched"),
+        "{shown:?}"
+    );
+    let ctx = rig.screen.ctx.clone();
+    let lookup = rig.picker.lookup();
+    let listing = rig.picker.listing(&ctx);
+    // The Alpaca card still shows (as it always did on All); no Oanda card does.
+    assert_eq!(
+        rig.picker
+            .notice(&listing, &lookup)
+            .and_then(|n| n.settings),
+        Some(SettingsPage::Alpaca),
+        "no Oanda credential card on the All tab"
+    );
+
+    // On the Forex tab the same failure is a card that opens the Oanda settings page.
+    rig.picker.set_scope(Scope::Forex);
+    rig.settle();
+    let ctx = rig.screen.ctx.clone();
+    let lookup = rig.picker.lookup();
+    let listing = rig.picker.listing(&ctx);
+    let notice = rig
+        .picker
+        .notice(&listing, &lookup)
+        .expect("forex cannot be searched");
+    assert_eq!(notice.title, "Set up Oanda to search forex");
+    assert_eq!(notice.settings, Some(SettingsPage::Oanda));
+    let shown = texts(&mut rig);
+    assert!(
+        shown
+            .iter()
+            .any(|text| text == "Nothing matches “zzz”. Searched: Oanda."),
+        "{shown:?}"
+    );
+
+    // An OANDA: prefix on the All tab targets Oanda the same way.
+    let mut rig = Rig::new(1100.0, "");
+    rig.type_text("oanda:zzz");
+    let ctx = rig.screen.ctx.clone();
+    let lookup = rig.picker.lookup();
+    assert_eq!(lookup.venue, Some(DataSource::Oanda));
+    let listing = rig.picker.listing(&ctx);
+    let notice = rig.picker.notice(&listing, &lookup).expect("a notice");
+    assert_eq!(notice.settings, Some(SettingsPage::Oanda));
+}
+
+#[test]
+fn the_notice_button_keeps_one_gap_to_the_card_on_every_side() {
+    let card = Rect::from_min_size(pos2(20.0, 400.0), vec2(520.0, NOTICE_HEIGHT));
+    // Its width follows its label, so a longer translation grows it leftwards, never past the edge.
+    for width in [76.0, 137.0, 210.0] {
+        let button = notice_button_rect(card, width);
+        assert_eq!(button.width(), width);
+        assert_eq!(card.right() - button.right(), button.top() - card.top());
+        assert_eq!(button.top() - card.top(), card.bottom() - button.bottom());
+    }
 }
 
 fn lists() -> Vec<WatchlistGroup> {
@@ -546,6 +644,7 @@ fn the_watchlists_tab_is_the_last_tab_and_tab_wraps_to_all() {
     for expected in [
         Scope::Stocks,
         Scope::Crypto,
+        Scope::Forex,
         Scope::Predictions,
         Scope::Dashboards,
         Scope::Watchlists,
@@ -1253,7 +1352,7 @@ fn a_venue_nothing_serves_is_named_and_the_symbol_searched_everywhere() {
     let shown = texts(&mut rig);
     assert!(
         shown.iter().any(|text| text
-            == "KUCOIN isn't supported. Searched: Binance, Coinbase, OKX, Kraken, Bybit, Gate.io, MEXC, DEXScreener, CoinGecko, Alpaca."),
+            == "KUCOIN isn't supported. Searched: Binance, Coinbase, OKX, Kraken, Bybit, Gate.io, MEXC, DEXScreener, CoinGecko, Alpaca, and Oanda."),
         "{shown:?}"
     );
     assert!(
@@ -1270,7 +1369,7 @@ fn a_plain_miss_lists_the_venues_that_were_searched() {
     let shown = texts(&mut rig);
     assert!(
         shown.iter().any(|text| text
-            == "Nothing matches “zzz”. Searched: Binance, Coinbase, OKX, Kraken, Bybit, Gate.io, MEXC, DEXScreener, CoinGecko, Alpaca."),
+            == "Nothing matches “zzz”. Searched: Binance, Coinbase, OKX, Kraken, Bybit, Gate.io, MEXC, DEXScreener, CoinGecko, Alpaca, and Oanda."),
         "{shown:?}"
     );
     rig.picker.set_venue(Some(DataSource::Coinbase));
@@ -1352,15 +1451,21 @@ fn comparing_offers_only_the_tabs_whose_markets_can_be_drawn_over_a_chart() {
         seen.push(rig.picker.scope);
     }
     assert_eq!(
-        seen[..4],
-        [Scope::Stocks, Scope::Crypto, Scope::Watchlists, Scope::All]
+        seen[..5],
+        [
+            Scope::Stocks,
+            Scope::Crypto,
+            Scope::Forex,
+            Scope::Watchlists,
+            Scope::All
+        ]
     );
 }
 
 #[test]
 fn the_tab_row_gives_up_room_in_order_and_never_asks_for_more_than_it_has() {
-    // The six tab titles and the "All venues" pull-down, as they measure at 15 and 14 pt.
-    let labels = [16.9, 45.5, 45.6, 74.7, 80.3, 69.3];
+    // The seven tab titles and the "All venues" pull-down, as they measure at 15 and 14 pt.
+    let labels = [16.9, 45.5, 45.6, 37.1, 74.7, 80.3, 69.3];
     let filter = Some(161.7);
     let roomy = TabFit {
         padding: 28.0,
@@ -1372,7 +1477,7 @@ fn the_tab_row_gives_up_room_in_order_and_never_asks_for_more_than_it_has() {
         fit_tabs(&labels, filter, 630.0),
         TabFit {
             padding: 20.0,
-            compact: false
+            compact: true
         }
     );
     assert_eq!(
@@ -1397,9 +1502,9 @@ fn the_tab_row_gives_up_room_in_order_and_never_asks_for_more_than_it_has() {
         }
     );
     // With no pull-down the tabs keep their room longer.
-    assert_eq!(fit_tabs(&labels, None, 520.0), roomy);
-    // The smallest picker (520 wide) still holds every tab and the pull-down's icon.
-    let room = 520.0 - 2.0 * PADDING;
+    assert_eq!(fit_tabs(&labels, None, 600.0), roomy);
+    // The smallest picker still holds every tab and the pull-down's icon.
+    let room = MIN_WIDTH - 2.0 * PADDING;
     let fit = fit_tabs(&labels, filter, room);
     let used: f32 = labels.iter().map(|label| label + fit.padding).sum::<f32>()
         + FILTER_GAP
@@ -1427,6 +1532,13 @@ fn gallery_of_the_symbol_picker() {
         ),
         ("symbol-picker-narrow", 640.0, "btc", Scope::All, &bitcoin),
         ("symbol-picker-notice", 1100.0, "eth", Scope::All, &bitcoin),
+        (
+            "symbol-picker-notice-narrow",
+            640.0,
+            "eth",
+            Scope::All,
+            &bitcoin,
+        ),
         (
             "symbol-picker-watchlists",
             1100.0,
@@ -1563,6 +1675,49 @@ fn gallery_of_the_symbol_picker() {
             rig.settle();
             let (_, output) = rig.frame_with_output(Vec::new());
             rig.screen.save(&format!("{name}-{suffix}"), output);
+        }
+    }
+}
+
+/// The picker in the pseudo-locale at its narrowest, on a few tabs, in both appearances: the tabs,
+/// the filter pull-down, the footer's hints and the empty answers all fit their room.
+/// `DEGENVIEW_GALLERY_DIR=<dir>` writes the pictures.
+#[test]
+fn the_picker_draws_in_the_pseudo_locale() {
+    use crate::i18n::{Locale, with_locale};
+    use crate::ui::chart::painted_text;
+
+    let _theme = crate::ui::theme::RestoreDefaultTheme;
+    let bitcoin = quote(76_075.70, 208.12, 0.27, Freshness::Live);
+    for (theme_name, app_theme) in [
+        ("dark", crate::ui::theme::AppTheme::Dark),
+        ("light", crate::ui::theme::AppTheme::Light),
+    ] {
+        for (name, query, scope) in [
+            ("all", "btc", Scope::All),
+            ("none", "zzzz", Scope::All),
+            ("empty", "", Scope::All),
+            ("predictions", "", Scope::Predictions),
+            ("dashboards", "", Scope::Dashboards),
+        ] {
+            with_locale(Locale::PSEUDO, || {
+                let mut rig = Rig::sized(640.0, 560.0, query);
+                crate::ui::theme::apply(&rig.screen.ctx, app_theme);
+                rig.quote = Some(bitcoin.clone());
+                rig.on_tab = vec![InstrumentId::new(DataSource::Binance, "BTCUSDT")];
+                rig.picker.set_watchlists(lists());
+                rig.picker.set_scope(scope);
+                rig.settle();
+                let (_, output) = rig.frame_with_output(Vec::new());
+                let texts = painted_text::of(&output);
+                painted_text::assert_painted(&texts, "Predictions");
+                painted_text::assert_painted(&texts, "Navigate");
+                if gallery_dir().is_some() {
+                    eprintln!("{name}: {:?}", painted_text::unbracketed(&texts));
+                    rig.screen
+                        .save(&format!("pseudo-symbol-picker-{name}-{theme_name}"), output);
+                }
+            });
         }
     }
 }

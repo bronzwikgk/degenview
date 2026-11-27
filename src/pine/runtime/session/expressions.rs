@@ -114,11 +114,18 @@ impl Session {
             Expression::Call {
                 name,
                 arguments,
+                map_types,
                 site,
                 range,
                 route,
                 target,
             } => {
+                if let Some(types) = map_types {
+                    return Ok(crate::pine::builtins::map::construct(
+                        &mut self.working,
+                        [types[0].kind, types[1].kind],
+                    ));
+                }
                 #[cfg(any(test, feature = "corpus"))]
                 let target = if self.ignore_routes { &None } else { target };
                 if let Some(id) = target {
@@ -273,9 +280,7 @@ impl Session {
                 (bar.high + bar.low + 2.0 * bar.close) / 4.0,
             )),
             "time" => Some(RuntimeValue::Int(bar.open_time)),
-            "time_close" => Some(RuntimeValue::Int(
-                bar.open_time + (self.bar_seconds * 1000.0) as i64,
-            )),
+            "time_close" => Some(RuntimeValue::Int(self.bar_end(bar))),
             "bar_index" => Some(RuntimeValue::Int(self.working.bar_index)),
             "last_bar_index" => Some(RuntimeValue::Int(self.last_bar_index)),
             "last_bar_time" => self

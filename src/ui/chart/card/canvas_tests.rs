@@ -83,6 +83,8 @@ pub(super) struct Harness {
     pub(super) card: ChartCard,
     pub(super) candles: Vec<Kline>,
     pub(super) replay_active: bool,
+    /// A pick of bars is under way (replay start, Pine Logs range).
+    pub(super) picking: bool,
     pub(super) pointer: Option<Pos2>,
     pub(super) crosshair: Option<CrosshairInfo>,
     pub(super) indicators: IndicatorConfig,
@@ -98,6 +100,8 @@ pub(super) struct Harness {
     pub(super) button: Option<bool>,
     /// The window's size; `SIZE` unless a test wants a narrower chart.
     pub(super) size: Vec2,
+    /// The pointer's shape the last frame asked for.
+    pub(super) cursor: egui::CursorIcon,
 }
 
 impl Harness {
@@ -110,6 +114,7 @@ impl Harness {
             card,
             candles: series(300),
             replay_active: false,
+            picking: false,
             pointer: None,
             crosshair: None,
             indicators: IndicatorConfig::default(),
@@ -121,6 +126,7 @@ impl Harness {
             sent: None,
             button: None,
             size: SIZE,
+            cursor: egui::CursorIcon::Default,
         }
     }
 
@@ -147,6 +153,7 @@ impl Harness {
         self.sent = self.pointer;
         let mut pointer = ChartPointer::default();
         let source = self.source;
+        let picking = self.picking;
         let (card, candles, replay_active, crosshair, error, scale_mode) = (
             &mut self.card,
             &self.candles,
@@ -160,7 +167,7 @@ impl Harness {
             let mut drawing = DrawingFrame::new(drawings, crate::model::Tool::Cursor, None, 1)
                 .with_view(Timeframe::HOUR_1, false);
             let mut replay = ReplayChartFrame {
-                selecting: false,
+                selecting: picking,
                 active: replay_active,
                 picked_ms: None,
                 picked_range: None,
@@ -181,6 +188,7 @@ impl Harness {
             );
         });
         output.textures_delta.clear();
+        self.cursor = output.platform_output.cursor_icon;
         (std::mem::take(&mut output.shapes), pointer)
     }
 
@@ -293,6 +301,24 @@ fn a_tiny_price_counts_its_zeros_on_the_axis_by_default() {
 }
 
 #[test]
+fn a_chart_drawn_across_a_decade_boundary_labels_its_axis_without_failing() {
+    // Prices that straddle 1, 0.1 and 0.01 from every side: the painter, not just the formatter.
+    for decade in [0.01, 1e-3, 1e-4] {
+        for step in 0..60 {
+            let scale = decade * (0.7 + f64::from(step) * 0.01);
+            let mut harness = Harness::new(ChartCanvas::default());
+            harness.candles = scaled_series(scale);
+            let (drawn, _) = harness.draw();
+            let labels = axis_texts(&drawn);
+            assert!(labels.len() >= 3, "{scale}: {labels:?}");
+            let mut distinct = labels.clone();
+            distinct.dedup();
+            assert_eq!(distinct.len(), labels.len(), "{scale}: {labels:?}");
+        }
+    }
+}
+
+#[test]
 fn writing_the_zeros_out_gives_plain_decimals() {
     let mut harness = Harness::new(ChartCanvas::default());
     harness.candles = scaled_series(1e-7);
@@ -341,6 +367,187 @@ fn automatic_places_never_repeat_a_label_when_the_ticks_are_close() {
     );
     assert_eq!(tick_step(&[67_432.0]), 0.0);
     assert_eq!(tick_step(&[]), 0.0);
+}
+
+#[test]
+fn a_step_taken_from_ticks_does_not_carry_their_rounding_error() {
+    // 0.9 - 0.8 is 0.09999999999999998: the axis still counts in tenths.
+    assert_eq!(tick_step(&[0.8, 0.9]), 0.1);
+    assert_eq!(tick_step(&[0.8, 0.9, 1.0, 1.1]), 0.1);
+    let card = ChartCard::default();
+    let (scale, format) = (
+        PriceScale::linear(0.8, 1.1, 0.0, 100.0),
+        card.appearance.price_format(),
+    );
+    let labels: Vec<String> = [0.8, 0.9, 1.0, 1.1]
+        .iter()
+        .map(|tick| scale.tick_label(format, *tick, tick_step(&[0.8, 0.9, 1.0, 1.1])))
+        .collect();
+    assert_eq!(labels, ["0.80", "0.90", "1.00", "1.10"]);
+}
+
+#[test]
+fn every_axis_the_grid_can_draw_has_distinct_labels_with_the_same_places_below_one() {
+    let format = crate::model::PriceFormat::AUTO;
+    let mut axes = 0;
+    for exponent in -3..=3 {
+        for low in [1.0, 1.1, 1.5, 2.0, 2.5, 3.3, 5.0, 7.0, 8.0, 9.0, 9.5, 9.9] {
+            for span in [
+                0.01, 0.02, 0.03, 0.05, 0.1, 0.2, 0.25, 0.3, 0.5, 1.0, 2.0, 5.0,
+            ] {
+                for budget in [2, 3, 5, 8, 12] {
+                    let minimum = low * 10f64.powi(exponent);
+                    let maximum = minimum * (1.0 + span);
+                    let ticks = chart::canvas::price_ticks(minimum, maximum, false, budget);
+                    if ticks.len() < 2 {
+                        continue;
+                    }
+                    axes += 1;
+                    let step = tick_step(&ticks);
+                    let labels: Vec<String> = ticks
+                        .iter()
+                        .map(|tick| format.format_tick(*tick, step))
+                        .collect();
+                    let context =
+                        format!("{minimum}..{maximum} x{budget}: {ticks:?} -> {labels:?}");
+                    let mut distinct = labels.clone();
+                    distinct.dedup();
+                    assert_eq!(distinct.len(), labels.len(), "{context}");
+                    // Labels of one decade under 1 write the same places. An axis that crosses a decade with a
+                    // step finer than its tenth still mixes them (0.0950 over 0.1000): `format_tick` sees
+                    // one tick at a time, so that needs the axis's places passed in, not a tighter test.
+                    let places: Vec<usize> = ticks
+                        .iter()
+                        .zip(&labels)
+                        .filter(|(tick, _)| (0.001..1.0).contains(&tick.abs()))
+                        .map(|(_, label)| label.split_once('.').map_or(0, |(_, rest)| rest.len()))
+                        .collect();
+                    let one_decade = ticks
+                        .iter()
+                        .filter(|tick| (0.001..1.0).contains(&tick.abs()))
+                        .map(|tick| tick.abs().log10().floor() as i32)
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len()
+                        <= 1;
+                    if one_decade {
+                        assert!(
+                            places.windows(2).all(|pair| pair[0] == pair[1]),
+                            "{context}"
+                        );
+                    }
+                    // A label reads the tick it labels, to the step's own precision.
+                    for (tick, label) in ticks.iter().zip(&labels) {
+                        let read: f64 = label.replace(',', "").parse().unwrap_or(f64::NAN);
+                        assert!((read - tick).abs() <= step * 0.5 + 1e-12, "{context}");
+                    }
+                }
+            }
+        }
+    }
+    assert!(axes > 1_000, "{axes}");
+}
+
+#[test]
+fn a_step_that_is_already_round_is_not_moved_by_the_nine_digit_snap() {
+    for exponent in -8..=8 {
+        for nice in ["1", "2", "2.5", "5"] {
+            let expected: f64 = format!("{nice}e{exponent}").parse().unwrap();
+            // Ticks as the grid makes them: whole multiples of the step, far from and near zero.
+            for first in [0, 1, 3, 7, 40, 999] {
+                let ticks: Vec<f64> = (0..4)
+                    .map(|index| f64::from(first + index) * expected)
+                    .collect();
+                let step = tick_step(&ticks);
+                assert_eq!(step, expected, "{nice}e{exponent} from {first}: {ticks:?}");
+                // Snapping a snapped step is a no-op.
+                assert_eq!(tick_step(&[0.0, step]), step, "{nice}e{exponent}");
+            }
+        }
+    }
+    // Nothing to measure stays nothing; a step is never snapped to zero or out of range.
+    assert_eq!(tick_step(&[1.0, 1.0]), 0.0);
+    assert!(tick_step(&[0.0, 1e-300]) > 0.0);
+    assert!(tick_step(&[0.0, 1e300]).is_finite());
+}
+
+#[test]
+fn an_axis_through_zero_or_below_it_has_distinct_labels() {
+    // A script pane's axis crosses zero: its labels never repeat and none fails.
+    let format = crate::model::PriceFormat::AUTO;
+    let mut axes = 0;
+    for exponent in -4..=3 {
+        for low in [-9.5, -5.0, -2.5, -1.2, -0.7, -0.15, -0.05, 0.0] {
+            for span in [0.02, 0.1, 0.3, 0.5, 1.0, 2.0, 7.0, 30.0] {
+                for budget in [2, 4, 6, 10] {
+                    let minimum = low * 10f64.powi(exponent);
+                    let maximum = minimum + span * 10f64.powi(exponent);
+                    let ticks = chart::canvas::price_ticks(minimum, maximum, false, budget);
+                    if ticks.len() < 2 {
+                        continue;
+                    }
+                    // A price under 0.001 counts its zeros and takes no places from its step, so
+                    // neighbours that close may read alike (the formatter's tiny-price rule).
+                    if ticks.iter().any(|tick| {
+                        tick.abs() > 1e-9
+                            && tick.abs() < crate::model::chart::price_format::SMALL_BELOW
+                    }) {
+                        continue;
+                    }
+                    axes += 1;
+                    let step = tick_step(&ticks);
+                    let labels: Vec<String> = ticks
+                        .iter()
+                        .map(|tick| {
+                            // As `pane_labels` writes it: zero up to rounding reads "0".
+                            if tick.abs() < (maximum - minimum) * 1e-9 {
+                                "0".to_owned()
+                            } else {
+                                format.format_tick(*tick, step)
+                            }
+                        })
+                        .collect();
+                    let mut distinct = labels.clone();
+                    distinct.dedup();
+                    assert_eq!(
+                        distinct.len(),
+                        labels.len(),
+                        "{minimum}..{maximum} x{budget}: {ticks:?} -> {labels:?}"
+                    );
+                }
+            }
+        }
+    }
+    assert!(axes > 500, "{axes}");
+}
+
+#[test]
+fn every_price_scale_mode_labels_an_axis_across_decade_boundaries_and_zero() {
+    for mode in PriceScaleMode::ALL {
+        // Prices from a decade above to below zero: the sample market, scaled then shifted.
+        for factor in [1e-4, 1e-3, 0.0095, 0.01, 0.0105, 0.05, 1.0] {
+            for shift in [0.0, 0.9, 1.0, 1.1, 1.3] {
+                let mut harness = Harness::new(ChartCanvas::default());
+                harness.scale_mode = mode;
+                harness.candles = scaled_series(factor)
+                    .into_iter()
+                    .map(|bar| Kline {
+                        open: bar.open - shift * 100.0 * factor,
+                        high: bar.high - shift * 100.0 * factor,
+                        low: bar.low - shift * 100.0 * factor,
+                        close: bar.close - shift * 100.0 * factor,
+                        ..bar
+                    })
+                    .collect();
+                let (drawn, _) = harness.draw();
+                let labels = axis_texts(&drawn);
+                let context = format!("{mode:?} x{factor} -{shift}: {labels:?}");
+                assert!(labels.len() >= 2, "{context}");
+                let mut distinct = labels.clone();
+                distinct.dedup();
+                assert_eq!(distinct.len(), labels.len(), "{context}");
+            }
+        }
+    }
 }
 
 // MARK: Background
@@ -1398,6 +1605,21 @@ pub(super) fn wait_for_run(harness: &mut Harness, id: u64) {
 }
 
 #[test]
+fn a_chart_runs_scripts_only_while_one_is_visible() {
+    let mut harness = Harness::new(ChartCanvas::default());
+    assert!(!harness.card.runs_scripts());
+    let id = harness
+        .card
+        .add_pine_instance(None, "Overlay", OVERLAY_SCRIPT);
+    assert!(harness.card.runs_scripts());
+    harness.card.set_pine_visible(id, false);
+    assert!(
+        !harness.card.runs_scripts(),
+        "a hidden script does not run, so it asks for no history"
+    );
+}
+
+#[test]
 fn a_new_overlay_script_never_claims_a_pane_while_it_evaluates() {
     let mut harness = Harness::new(ChartCanvas::default());
     let id = harness
@@ -1652,6 +1874,84 @@ fn panes_get_their_separators_and_the_canvas_grid() {
     );
 }
 
+/// Applies the bundled indicator `id` to the harness's chart and draws until its run has arrived.
+pub(super) fn add_bundled(harness: &mut Harness, id: &str) {
+    let indicator = crate::model::pine::bundled::find(id).expect("a bundled indicator");
+    let instance = harness.card.add_pine_instance(
+        Some(crate::model::pine::bundled::script_id(indicator)),
+        indicator.name.msgid(),
+        indicator.source,
+    );
+    let ran = |harness: &Harness| {
+        harness
+            .card
+            .pine_status(instance)
+            .is_some_and(|status| status.error.is_none())
+    };
+    for _ in 0..300 {
+        harness.frame();
+        if ran(harness) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(ran(harness), "{id} ran");
+}
+
+/// A chart with one bundled indicator on it, drawn until its run has arrived.
+fn with_bundled(id: &str) -> Harness {
+    let mut harness = Harness::new(ChartCanvas::default());
+    add_bundled(&mut harness, id);
+    harness
+}
+
+/// The numbers a chart prints on its price axis below `top`: what its panes' scales say.
+fn axis_values_below(drawn: &Drawn, top: f32) -> Vec<f64> {
+    drawn
+        .texts
+        .iter()
+        .filter(|(pos, ..)| pos.x > SIZE.x - 90.0 && pos.y > top)
+        .filter_map(|(_, text, _)| text.parse::<f64>().ok())
+        .collect()
+}
+
+#[test]
+fn rsi_gets_a_pane_of_its_own_with_its_own_scale() {
+    let mut harness = with_bundled("rsi");
+    let (drawn, _) = harness.draw();
+    assert_eq!(harness.card.pane_count(), 1, "RSI is a pane like MACD");
+    // The price axis keeps its prices: the candles are not squeezed or overdrawn by the RSI.
+    let prices = axis_values_below(&drawn, 0.0);
+    assert!(
+        prices.iter().any(|value| *value > 200.0),
+        "the price axis is still there: {prices:?}"
+    );
+    // The pane has an axis of its own, in the RSI's own units.
+    let pane_scale = axis_values_below(&drawn, SIZE.y * 0.7);
+    assert!(
+        pane_scale.len() >= 2 && pane_scale.iter().all(|value| (0.0..=100.0).contains(value)),
+        "an RSI scale of its own: {pane_scale:?}"
+    );
+}
+
+#[test]
+fn a_bundled_indicator_gets_the_placement_it_declares() {
+    for indicator in &crate::model::pine::bundled::ALL {
+        let harness = with_bundled(indicator.id);
+        assert_eq!(
+            harness.card.pane_count(),
+            usize::from(!indicator.overlay),
+            "{}: {}",
+            indicator.name.msgid(),
+            if indicator.overlay {
+                "an overlay stays on the price pane"
+            } else {
+                "declared a pane of its own"
+            }
+        );
+    }
+}
+
 #[test]
 fn pane_buttons_move_collapse_maximize_and_remove_the_right_script() {
     let mut harness = with_panes(ChartCanvas::default());
@@ -1680,8 +1980,8 @@ fn pane_buttons_move_collapse_maximize_and_remove_the_right_script() {
     harness
         .card
         .apply_pane_action(ids[1], PaneAction::ToggleCollapse);
-    assert!(harness.card.pine_instances()[1].pane_collapsed);
-    assert!(!harness.card.pine_instances()[0].pane_collapsed);
+    assert!(harness.card.pine_instances()[1].pane.collapsed);
+    assert!(!harness.card.pine_instances()[0].pane.collapsed);
     assert_eq!(
         harness.card.pine_instances().len(),
         2,
@@ -1698,7 +1998,7 @@ fn pane_buttons_move_collapse_maximize_and_remove_the_right_script() {
         .apply_pane_action(ids[1], PaneAction::ToggleMaximize);
     assert_eq!(harness.card.maximized_pane, Some(ids[1]));
     assert!(
-        !harness.card.pine_instances()[1].pane_collapsed,
+        !harness.card.pine_instances()[1].pane.collapsed,
         "maximizing expands"
     );
     harness.draw();
@@ -1712,6 +2012,181 @@ fn pane_buttons_move_collapse_maximize_and_remove_the_right_script() {
         names(&harness.card),
         ["Second"],
         "only the intended script went"
+    );
+}
+
+/// Presses on `from`, drags to `to` and lets go, a frame each.
+fn drag_pointer(harness: &mut Harness, from: Pos2, to: Pos2) {
+    harness.pointer = Some(from);
+    harness.frame();
+    harness.button = Some(true);
+    harness.frame();
+    harness.pointer = Some(to);
+    harness.frame();
+    harness.frame();
+    harness.button = Some(false);
+    harness.frame();
+}
+
+/// The heights the chart's panes have by default, and where its first pane's line is.
+fn pane_heights(harness: &Harness) -> (chart::canvas::PaneHeights, f32) {
+    let specs: Vec<chart::canvas::PaneSpec> = harness
+        .card
+        .pine_instances()
+        .iter()
+        .map(|instance| chart::canvas::PaneSpec::of(instance.id, instance.pane))
+        .collect();
+    let area = harness.card.body_rect;
+    let heights = chart::canvas::split_panes(area.height(), &specs, None, 0.0);
+    let line = area.top() + heights.main;
+    (heights, line)
+}
+
+#[test]
+fn dragging_the_line_above_a_pane_resizes_it_and_the_height_stays() {
+    let mut harness = with_panes(ChartCanvas::default());
+    harness.draw();
+    let (before, line) = pane_heights(&harness);
+    let x = harness.card.body_rect.center().x;
+    drag_pointer(&mut harness, Pos2::new(x, line), Pos2::new(x, line - 40.0));
+    let (after, _) = pane_heights(&harness);
+    assert!(
+        (after.panes[0] - before.panes[0] - 40.0).abs() <= 1.0,
+        "{before:?} {after:?}"
+    );
+    assert_eq!(
+        after.panes[1], before.panes[1],
+        "the other pane is untouched"
+    );
+    assert!(after.main < before.main, "the main chart gave the height");
+    assert!(harness.card.pine_instances()[0].pane.share.is_some());
+    assert!(harness.card.pane_drag.is_none(), "letting go ends the drag");
+    // The saved height is what the next frames draw.
+    harness.draw();
+    assert_eq!(pane_heights(&harness).0, after);
+}
+
+#[test]
+fn the_line_keeps_its_resize_pointer_and_its_drag_under_the_zoom_tool() {
+    let mut harness = with_panes(ChartCanvas::default());
+    harness.card.set_zoom_armed(true);
+    harness.draw();
+    let (before, line) = pane_heights(&harness);
+    let x = harness.card.body_rect.center().x;
+    // Just above the line: still the main plot, where the zoom tool shows its own pointer.
+    let on = Pos2::new(x, line - 2.0);
+    harness.pointer = Some(on);
+    harness.frame();
+    harness.frame();
+    assert_eq!(harness.cursor, egui::CursorIcon::ResizeVertical);
+    harness.button = Some(true);
+    harness.frame();
+    harness.pointer = Some(Pos2::new(x, line - 32.0));
+    harness.frame();
+    assert_eq!(harness.cursor, egui::CursorIcon::ResizeVertical);
+    assert!(
+        !harness.card.zoom_claims_drag(),
+        "no zoom rectangle under the line"
+    );
+    harness.frame();
+    harness.button = Some(false);
+    harness.frame();
+    let (after, _) = pane_heights(&harness);
+    assert!(
+        (after.panes[0] - before.panes[0] - 30.0).abs() <= 1.0,
+        "{before:?} {after:?}"
+    );
+}
+
+#[test]
+fn select_portion_and_a_pick_of_bars_own_the_line_too() {
+    for pick in [false, true] {
+        let mut harness = with_panes(ChartCanvas::default());
+        harness.draw();
+        let (before, line) = pane_heights(&harness);
+        let x = harness.card.body_rect.center().x;
+        if pick {
+            harness.picking = true;
+        } else {
+            harness.card.set_snapshot_select(true);
+        }
+        harness.pointer = Some(Pos2::new(x, line));
+        harness.frame();
+        harness.frame();
+        assert_ne!(
+            harness.cursor,
+            egui::CursorIcon::ResizeVertical,
+            "pick {pick}"
+        );
+        drag_pointer(&mut harness, Pos2::new(x, line), Pos2::new(x, line - 40.0));
+        assert_eq!(
+            pane_heights(&harness).0,
+            before,
+            "pick {pick}: not a resize"
+        );
+        assert!(
+            harness
+                .card
+                .pine_instances()
+                .iter()
+                .all(|instance| instance.pane.share.is_none())
+        );
+    }
+}
+
+#[test]
+fn a_press_beside_the_line_leaves_the_panes_alone() {
+    let mut harness = with_panes(ChartCanvas::default());
+    harness.draw();
+    let (_, line) = pane_heights(&harness);
+    let x = harness.card.body_rect.center().x;
+    drag_pointer(
+        &mut harness,
+        Pos2::new(x, line - 40.0),
+        Pos2::new(x - 60.0, line - 40.0),
+    );
+    assert!(
+        harness
+            .card
+            .pine_instances()
+            .iter()
+            .all(|instance| instance.pane.share.is_none())
+    );
+}
+
+#[test]
+fn a_drag_ends_when_the_panes_change_under_it() {
+    let mut harness = with_panes(ChartCanvas::default());
+    harness.draw();
+    let (_, line) = pane_heights(&harness);
+    let x = harness.card.body_rect.center().x;
+    harness.pointer = Some(Pos2::new(x, line));
+    harness.frame();
+    harness.button = Some(true);
+    harness.frame();
+    harness.pointer = Some(Pos2::new(x, line - 20.0));
+    harness.frame();
+    assert!(harness.card.pane_drag.is_some());
+    let ids = harness.card.pane_ids.clone();
+    // The pane below the held line goes away mid-drag; the rest must keep their own heights.
+    harness.card.apply_pane_action(ids[1], PaneAction::Remove);
+    harness.pointer = Some(Pos2::new(x, line - 60.0));
+    for _ in 0..3 {
+        harness.frame();
+    }
+    assert!(harness.card.pane_drag.is_none());
+    harness.button = Some(false);
+    harness.frame();
+    let shares: Vec<_> = harness
+        .card
+        .pine_instances()
+        .iter()
+        .map(|instance| instance.pane.share)
+        .collect();
+    assert_eq!(shares.len(), 1);
+    assert!(
+        shares[0].is_none_or(|share| share < 0.4),
+        "no stale height was written: {shares:?}"
     );
 }
 

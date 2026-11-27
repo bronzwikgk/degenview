@@ -4,14 +4,16 @@
 //! already owns the webhook + notification services.
 
 use crate::host::pine::KlineSecurityDataProvider;
-use crate::model::Kline;
 use crate::model::alert::pine::{PineAlertState, PineAlertSubscription};
 use crate::model::chart::synthetic::Construction;
+use crate::model::market::bucket::Grid;
 use crate::model::pine::instance::PineInstance;
+use crate::model::{Kline, Timeframe};
 use crate::pine::compiler::program::SymbolInfo;
 use crate::pine::runtime::execution::ExecutionController;
 use crate::pine::runtime::state::AlertEvent;
 use crate::pine::syntax::token::Limits;
+use crate::pine::time::bucket::seconds_of;
 use crate::store::Store;
 use crate::store::scripts::registry::LibraryRegistry;
 use std::collections::HashMap;
@@ -34,12 +36,14 @@ struct RunKey {
 
 /// What the chart a script alert runs on feeds it. A price-based chart gives the script its
 /// constructed bars (`bars` are those, and `bar_seconds` is the market candles' length, which
-/// their times cannot tell); every other chart type gives the market's own candles. Price alerts
+/// their times cannot tell); every other chart type gives the market's own candles. Either way
+/// `timeframe_seconds` is the length of the timeframe the chart is set to. Price alerts
 /// are not affected: they read the market's quotes.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ChartRun {
     pub construction: Option<Construction>,
     pub bar_seconds: Option<f64>,
+    pub timeframe_seconds: Option<f64>,
 }
 
 impl ChartRun {
@@ -48,22 +52,27 @@ impl ChartRun {
     pub fn feed(
         construction: Option<Construction>,
         candles: &[Kline],
+        timeframe: Timeframe,
         now_ms: i64,
     ) -> (Vec<Kline>, Self) {
+        let timeframe_seconds = Some(seconds_of(timeframe));
         let Some(construction) = construction else {
-            return (candles.to_vec(), Self::default());
+            return (
+                candles.to_vec(),
+                Self {
+                    timeframe_seconds,
+                    ..Self::default()
+                },
+            );
         };
         let bars =
             crate::model::chart::synthetic::build_with(construction, candles, now_ms).klines();
-        let bar_seconds = candles
-            .last()
-            .map(|last| ((last.close_time - last.open_time + 1) as f64 / 1000.0).round())
-            .filter(|seconds| *seconds > 0.0);
         (
             bars,
             Self {
                 construction: Some(construction),
-                bar_seconds,
+                bar_seconds: timeframe_seconds,
+                timeframe_seconds,
             },
         )
     }
@@ -242,6 +251,10 @@ impl PineSubscriptionHost {
                 )
                 .ok()
                 .map(ExecutionController::with_alert_mode)
+                .map(|controller| match chart.timeframe_seconds {
+                    Some(seconds) => controller.with_timeframe_seconds(seconds),
+                    None => controller,
+                })
                 .map(|controller| match chart.bar_seconds {
                     Some(seconds) => controller.with_bar_seconds(seconds),
                     None => controller,
@@ -278,12 +291,16 @@ pub fn symbol_info(symbol_key: &str) -> SymbolInfo {
         .split_once(':')
         .map(|(_, symbol)| symbol)
         .unwrap_or(symbol_key);
+    let source = symbol_key
+        .split_once(':')
+        .and_then(|(prefix, _)| crate::model::market::venue::source_for_prefix(prefix));
     SymbolInfo {
         ticker: ticker.to_owned(),
         ticker_id: symbol_key.to_owned(),
         currency: "USD".to_owned(),
         kind: "crypto".to_owned(),
         base_currency: None,
+        grid: source.map_or(Grid::Utc, |source| source.grid()),
         ..SymbolInfo::default()
     }
 }
@@ -506,6 +523,7 @@ mod tests {
         let chart = ChartRun {
             construction: Some(construction),
             bar_seconds: Some(3_600.0),
+            timeframe_seconds: Some(3_600.0),
         };
         let bricks = build_with(construction, &candles, LIVE_NOW + 2).klines();
         assert!(bricks.len() > candles.len());
@@ -563,5 +581,17 @@ mod tests {
             .len(),
             1
         );
+    }
+
+    #[test]
+    fn a_subscriptions_symbol_carries_the_grid_of_its_market() {
+        // A stock (by its exchange or by Alpaca's slug) is cut on the session, a crypto pair on the
+        // UTC day, a key with no market the UTC day too.
+        for key in ["NASDAQ:AAPL", "ALPACA:AAPL", "NYSE:IBM"] {
+            assert_eq!(symbol_info(key).grid, Grid::UsEquities, "{key}");
+        }
+        for key in ["BINANCE:BTCUSDT", "COINBASE:ETH-USD", "BTCUSDT"] {
+            assert_eq!(symbol_info(key).grid, Grid::Utc, "{key}");
+        }
     }
 }

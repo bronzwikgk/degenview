@@ -24,6 +24,7 @@ chart-overrides and watermark pages, and the "apply the same settings to all cha
 | Scales have text size, text colour and line colour | Supercharts guide; overrides `scalesProperties` |
 | Navigation buttons: zoom in/out, scroll left/right, reset view | Supercharts guide |
 | Pane buttons: move up/down, collapse, maximize, remove | Supercharts guide |
+| Dragging the line above a pane resizes it; the pane above (or the main chart) gives up what it gains | TradingView behaviour; the exact grab width and minimum heights are ours |
 | Top and bottom margins are percentages | overrides `topMargin`/`bottomMargin` |
 | Settings are per chart, and "Apply to all" copies one chart's to the rest of the layout | apply-to-all article |
 
@@ -59,8 +60,8 @@ opacity. Every row writes straight into the chart, which repaints at once.
   bar while the chart pans. The grid is drawn from the scale and never feeds back into it.
   Each script pane has its own price grid on its own scale and shares the vertical one.
 - **Pane separators.** The line above each script pane: on/off, colour, thickness, style. Shown
-  only when the chart has a pane; with none, the row says so. Panes are not resizable, so the
-  line has no drag behaviour to preserve.
+  only when the chart has a pane; with none, the row says so. The line is also the handle that
+  resizes the pane below it (see Panes).
 - **Crosshair.** Colour, opacity, thickness (1–4 pt) and style. The vertical line runs through the
   price chart and on through every pane; the horizontal line and price tag belong to the chart
   under the pointer. It is drawn above the series, the scripts and the drawings. Restyling does
@@ -70,6 +71,13 @@ opacity. Every row writes straight into the chart, which repaints at once.
   where they apply). On by default. Off hides the whole box; the crosshair lines, the price and time
   tags and the ring on a line chart's bar stay. The switch is DegenView's own, not stated by the
   TradingView pages cited above. Snapshots never contain the box (it belongs to the crosshair).
+- **Countdown to bar close.** On/off for the time the forming bar has left, a second row inside the
+  main series' last-price tag on the price axis ([the countdown](#countdown-to-bar-close) below).
+  Per chart, in the Scales section of this page and in the price axis' right-click menu. On by
+  default (TradingView's Supercharts default could not be established: its charting library's is
+  off, the chart the page was checked on had it on). Persisted in the canvas, so templates and
+  layouts carry it; a row with the setting on is written without the key, so a build that predates
+  it reads and writes the row unchanged.
 - **Watermark.** Hidden, Symbol (market and timeframe, with the source) or Replay mode. Centred in
   the plot, sized to the plot (at most 72 pt, never above 70 % of its width or 24 % of its height
   for the title) and left out when it would be under 16 pt. It is painted behind everything the
@@ -109,13 +117,39 @@ slots.
 ### Panes
 
 Pane order is the order of the scripts on the chart (`PineInstance` list), so moving a pane
-reorders that list and there is no second representation. Collapse is stored on the instance
-(`pane_collapsed`, saved with the chart; the script still runs). Maximize is view state and is
+reorders that list and there is no second representation. Collapse and dragged height are the
+instance's pane layout (`PineInstance::pane`, a `PaneLayout`, stored as its `pane_collapsed` and
+`pane_share` fields and saved with the chart; the script still runs). Maximize is view state and is
 not saved. Remove is the same removal as Scripts ▸ Remove from Chart. Layout is
-`model::chart::canvas::split_panes`: expanded panes share 30 % of the height, a collapsed one is a 24 pt
-strip, and a maximized pane takes everything but the strips and the time axis; the price chart
-then draws nothing but its time axis. Built-in indicators (volume, RSI, Bollinger) are drawn
-inside the price plot, not in panes, so they have no pane buttons.
+`model::chart::canvas::split_panes`: an expanded pane has the height it was dragged to
+(`PaneLayout::share`, a fraction of the chart's height), or else its
+part of the default 30 % of the height divided by the number of expanded panes; a collapsed one is a 24 pt strip, and a
+maximized pane takes everything but the strips and the time axis; the price chart then draws nothing
+but its time axis. The main chart takes what the panes leave and keeps at least 90 pt (60 % of a
+very short chart). Every expanded pane, dragged or not, keeps at least 48 pt, enough for its plot
+and its buttons; a chart without room for that gives its panes less, never under 24 pt (the
+buttons' height) while their strips fit, and the main chart yields last. What the panes want beyond those floors is cut
+back in proportion. `pane_limits` holds these numbers for the split and for the drag alike.
+
+Dragging the line above a pane (`card/pane_divider.rs`, 3 pt either side, resize cursor) moves
+height between the two panes it separates, as in TradingView: the pane below gains what the nearest
+expanded pane above it (or the main chart) loses, so the other panes and, between two panes, the
+main chart keep their size. Neither goes under the floors above. The first drag saves
+the heights of every expanded pane; a pane added later takes the default share and the main chart
+gives it the room, one removed gives its room back to the main chart. A height follows its script
+when panes are moved. Undo and redo of a script change (`workspace::undo`) restore which scripts are
+on the chart but keep each script's `pane` as it is now; a script that comes back after a removal has the layout it
+was removed with. Collapsed panes and a maximized pane have no line to drag. The drag is
+measured from the split it began on (`model::chart::canvas::drag_divider`), so rounding never
+accumulates, and every height is a difference of rounded edges, so a pane the drag does not touch
+never moves. A drag ends when the chart's panes or height change under it. The line takes the
+pointer whatever tool is armed (Zoom In included), as the pane buttons do, but a workspace mode that
+owns the whole chart (Select portion, a replay start or Pine Logs range pick) sees no line: no resize
+pointer and no drag. There is no double-click reset.
+
+The built-in indicators (volume, EMA, Bollinger, trend flips) are drawn inside the price plot, not in
+panes, so they have no pane buttons. RSI is not one of them: it is the bundled Pine indicator `rsi`,
+in a pane like MACD (see [Indicator catalog](indicator-picker.md)).
 
 ## The colour picker
 
@@ -139,6 +173,56 @@ script panes and their separators → crosshair → paper-trading markers → na
 drawn exactly as before.
 Script label and table-cell tooltips are not a layer: the live chart asks egui for one over the
 hovered label or cell after the tables are drawn (see the Pine guide), and a snapshot has none.
+
+## Countdown to bar close
+
+`model::chart::countdown` (pure, given the time) and `ChartCard::draw_last_price`.
+
+- **What it counts to.** The close of the bar that holds *now* on the bucket grid every source cuts
+  its candles on (`bucket::next_bucket_start_ms`), not the newest candle's open plus a length, so it
+  rolls over to the next bar by itself while the next candle is still on its way and nothing is made
+  up. While the newest candle is the forming bar its own `close_time` must be where the grid puts it
+  (within a second), else the countdown is hidden: provider and grid disagree. It is a function of the
+  clock alone (a missed frame, sleep, or a clock set back change nothing but the instant asked).
+- **When it is hidden**, rather than mislead: the setting is off; the type is price-based (Renko,
+  Kagi, Line Break, Point & Figure, Range: `ChartType::is_time_based`; Heikin Ashi counts down with
+  its candle); the source has no clock-cut bars (`DataSource::counts_down_bars`: not line charts,
+  CoinGecko, nor Alpaca, whose bars follow a US session with holidays and early closes that nothing
+  models: a countdown would run through a closed market); a replay cuts the chart (`cut_ms`);
+  nothing is loaded for the timeframe (`Chart::data_timeframe`); or data has not arrived for three
+  refresh intervals of the source (arrival of a refresh or the live feed, not of a trade, so a
+  quiet market is not a dead one; a failed refresh alone does not hide it). Both are recorded by
+  `Chart::note_arrival`, which a refresh and an accepted live bar call alike, so a chart the socket
+  keeps current counts down while its REST answer is slow or failing.
+- **Text** (`countdown::format`): `MM:SS` under an hour, `HH:MM:SS` under a day, `4d 3h` from a day
+  (hours rounded up), never negative.
+- **Tag.** The price row stays on the price line; the countdown is a second row of the same filled
+  tag, in the same size as the price, a line (1.2 × the price size) under it, or over it where the
+  plot ends too soon for the row. Both rows start at one left edge, the wider of the two centred in
+  the tag, as TradingView lays them out (measured on its canvas: equal glyph heights, rows 14 CSS px
+  apart, left-aligned). The text is black on the greens and light fills and white on the reds and
+  dark ones (`on_color`, shared with the other axis tags), since white on the green is hard to read.
+  Comparison-overlay tags keep clear of the whole tag (`TagBand`): the room they have is the plot
+  less the tag, each keeps its side, and one its side has no room for goes to the other, so the
+  plot's edge never pushes a tag back over the countdown. The axis is
+  measured with the widest text the timeframe can show (`widest_texts`) whenever the setting is on
+  and the chart's type and source are eligible, whether or not the countdown is showing, so its width
+  never changes with the digits or with the connection.
+- **Frame.** The workspace resolves it once per frame (`Chart::bar_countdown`, one clock reading for
+  all charts) and pushes it into the card (`ChartCard::set_countdown`), like the replay cutoff. The
+  card never reads the clock; the Pine Studio preview has no data age and shows none. A repaint is
+  asked only at the next change of the text (`Countdown::next_repaint`), by drawn charts only.
+  Nothing is stored, fetched, recomputed or marked dirty by a tick.
+- **Snapshots** include it, frozen at the capture (`ChartParts::countdown`, resolved once in
+  `chart_parts`), so previews and exports of one capture agree.
+
+Checked on TradingView (BTCUSDT, 2026-11-25): the toggle is *Labels ▸ Countdown to bar close* in the
+price scale's right-click menu; a 5m bar read `01:57`, a 1D bar `02:36:39`, a 1W bar `4d 3h` and a
+1M bar `5d 3h`; replay (1D) shows no countdown. Its support page lists the types above, delayed data
+and a market that is not trading as reasons to show none. **Inferred, not verified:** seconds count
+down to `00:00` (floor); where the price sits relative to the price line (here on it, the
+countdown below); its place above the price near the plot's bottom; Heikin Ashi; what TradingView shows in the instant a bar has
+closed and the next has not arrived (here the next bar's count); the intraday replay (paid plan).
 
 ## Templates
 
@@ -196,5 +280,10 @@ market, not the look.
 - Only solid/dashed/dotted line styles (TradingView's library has more).
 - Pine `chart.bg_color`/`fg_color` follow the app theme, not a custom backdrop.
 - Charts are per-chart settings only; there is no document-wide "apply to every window".
+- No toggles for the last-price label or line (TradingView has *Symbol last price label* and a
+  line one); only the countdown can be turned off.
+- The crosshair's price pill and a drawing's price tag paint over the last-price tag, countdown
+  row included, as they do over the price alone.
+- No countdown for stocks, forex or other session markets, and none for CoinGecko.
 - Not visually compared against TradingView side by side (no reference available offline); the
   rows above say which rules are documented and which are inferred.

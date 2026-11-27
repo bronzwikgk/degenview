@@ -3,6 +3,7 @@
 //! groups that do not fit wrap onto a second line.
 
 use super::{Action, Input, Output, PAD, swatches};
+use crate::i18n::{tr, tr_c};
 use crate::model::chart::snapshot::studio::{Area, AspectRatio, Include, Style};
 use crate::ui::icons::{self, Icon};
 use crate::ui::kit::{self, REGULAR, Segment, size};
@@ -14,7 +15,7 @@ use eframe::egui::{
 /// The height of a group: its label, the gap and the control.
 const GROUP_HEIGHT: f32 = 13.0 + LABEL_GAP + CONTROL_HEIGHT;
 const LABEL_GAP: f32 = 7.0;
-const CONTROL_HEIGHT: f32 = 22.0;
+const CONTROL_HEIGHT: f32 = kit::outline::HEIGHT;
 /// The room around a hairline between two groups, each side.
 const GROUP_GAP: f32 = 14.0;
 const LINE_GAP: f32 = 14.0;
@@ -22,7 +23,11 @@ const LINE_GAP: f32 = 14.0;
 const TOP: f32 = 4.0;
 const BOTTOM: f32 = 18.0;
 /// One toggle of the Include pill.
-const TOGGLE: egui::Vec2 = vec2(30.0, 18.0);
+const TOGGLE: egui::Vec2 = vec2(30.0, CONTROL_HEIGHT - 2.0 * kit::outline::INSET);
+/// The room between neighbouring toggles.
+const TOGGLE_GAP: f32 = 2.0;
+/// What the three toggles and their gaps take, with the well's inset around them.
+const INCLUDE_WIDTH: f32 = 3.0 * TOGGLE.x + 2.0 * TOGGLE_GAP + 2.0 * kit::outline::INSET;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Group {
@@ -42,13 +47,13 @@ impl Group {
         Self::Include,
     ];
 
-    const fn label(self) -> &'static str {
+    fn label(self) -> &'static str {
         match self {
-            Self::Area => "Area",
-            Self::Style => "Style",
-            Self::Size => "Size",
-            Self::Background => "Background",
-            Self::Include => "Include",
+            Self::Area => tr_c!("what the image shows", "Area"),
+            Self::Style => tr!("Style"),
+            Self::Size => tr_c!("text or image size", "Size"),
+            Self::Background => tr!("Background"),
+            Self::Include => tr!("Include"),
         }
     }
 }
@@ -95,7 +100,7 @@ fn size_options(enabled: bool) -> Vec<Segment<'static, AspectRatio>> {
             Segment::new(size, size.label()).tooltip(if enabled {
                 size.tooltip()
             } else {
-                "Size applies to the Styled look"
+                tr!("Size applies to the Styled look")
             })
         })
         .collect()
@@ -108,15 +113,11 @@ fn size_shown(input: &Input<'_>) -> AspectRatio {
 
 fn control_width(ui: &Ui, group: Group, input: &Input<'_>) -> f32 {
     match group {
-        Group::Area => kit::segments_width(ui, &area_options(input), input.config.area),
-        Group::Style => kit::segments_width(ui, &style_options(), input.config.style),
-        Group::Size => kit::segments_width(
-            ui,
-            &size_options(input.config.size_enabled()),
-            size_shown(input),
-        ),
+        Group::Area => kit::segments_width(ui, &area_options(input)),
+        Group::Style => kit::segments_width(ui, &style_options()),
+        Group::Size => kit::segments_width(ui, &size_options(input.config.size_enabled())),
         Group::Background => swatches::WIDTH,
-        Group::Include => 3.0 * TOGGLE.x + 2.0 * 2.0 + 4.0,
+        Group::Include => INCLUDE_WIDTH,
     }
 }
 
@@ -237,34 +238,36 @@ fn include(ui: &mut Ui, input: &Input<'_>, output: &mut Output) {
     let toggles = [
         Toggle {
             icon: Icon::Indicators,
-            name: "Indicators",
+            name: tr!("Indicators"),
             on: include.indicators,
-            unavailable: (!input.has_indicators).then_some("No indicators on this chart"),
+            unavailable: (!input.has_indicators).then_some(tr!("No indicators on this chart")),
         },
         Toggle {
             icon: Icon::Pencil,
-            name: "Drawings",
+            name: tr!("Drawings"),
             on: include.drawings,
-            unavailable: (!input.has_drawings).then_some("No visible drawings"),
+            unavailable: (!input.has_drawings).then_some(tr!("No visible drawings")),
         },
         Toggle {
             icon: Icon::Branding,
-            name: "DegenView mark",
+            name: tr!("DegenView mark"),
             on: include.branding,
             unavailable: (config.style != Style::Styled)
-                .then_some("The mark belongs to the Styled look"),
+                .then_some(tr!("The mark belongs to the Styled look")),
         },
     ];
-    let (track, _) = ui.allocate_exact_size(
-        vec2(3.0 * TOGGLE.x + 2.0 * 2.0 + 4.0, CONTROL_HEIGHT),
-        Sense::hover(),
+    let (track, _) = ui.allocate_exact_size(vec2(INCLUDE_WIDTH, CONTROL_HEIGHT), Sense::hover());
+    kit::outline::paint_track(
+        ui.painter(),
+        track,
+        kit::outline::RADIUS,
+        kit::outline::Wash::Rest,
     );
-    ui.painter().rect_filled(track, 6.0, kit::primary(0.1));
     for (index, toggle) in toggles.iter().enumerate() {
         let cell = Rect::from_min_size(
             pos2(
-                track.left() + 2.0 + index as f32 * (TOGGLE.x + 2.0),
-                track.top() + 2.0,
+                track.left() + kit::outline::INSET + index as f32 * (TOGGLE.x + TOGGLE_GAP),
+                track.top() + kit::outline::INSET,
             ),
             TOGGLE,
         );
@@ -278,33 +281,24 @@ fn include(ui: &mut Ui, input: &Input<'_>, output: &mut Output) {
                 Sense::hover()
             },
         );
-        let state = if toggle.on && usable { "on" } else { "off" };
-        let response =
-            crate::ui::accessibility::label(response, format!("{}, {state}", toggle.name))
-                .on_hover_text(toggle.unavailable.unwrap_or(toggle.name));
+        let described = if toggle.on && usable {
+            tr!("{name}, on", name = toggle.name)
+        } else {
+            tr!("{name}, off", name = toggle.name)
+        };
+        let response = crate::ui::accessibility::label(response, described)
+            .on_hover_text(toggle.unavailable.unwrap_or(toggle.name));
         let lit = toggle.on && usable;
         if lit {
-            ui.painter().add(
-                egui::Shadow {
-                    offset: [0, 1],
-                    blur: 2,
-                    spread: 0,
-                    color: egui::Color32::from_black_alpha(50),
-                }
-                .as_shape(cell, 5.0),
-            );
-            ui.painter().rect_filled(
-                cell,
-                5.0,
-                theme::pick(kit::primary(0.24), egui::Color32::WHITE),
-            );
+            kit::outline::paint_plate(ui.painter(), cell, kit::outline::PLATE_RADIUS, false);
         } else if usable && response.hovered() {
-            ui.painter().rect_filled(cell, 5.0, theme::ink(10));
+            ui.painter()
+                .rect_filled(cell, kit::outline::PLATE_RADIUS, theme::ink(10));
         }
         if usable && response.has_focus() {
             ui.painter().rect_stroke(
                 cell,
-                5.0,
+                kit::outline::PLATE_RADIUS,
                 Stroke::new(1.5, theme::text_secondary()),
                 StrokeKind::Inside,
             );

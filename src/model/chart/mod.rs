@@ -4,6 +4,7 @@ pub mod appearance;
 pub mod canvas;
 pub mod clipboard;
 pub mod context;
+pub mod countdown;
 pub mod kind;
 pub(in crate::model) mod layout;
 pub mod look;

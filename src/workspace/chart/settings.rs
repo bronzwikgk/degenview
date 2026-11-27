@@ -27,7 +27,6 @@ impl ChartWorkspace {
                 title: &title,
                 symbol: &chart.symbol,
                 source: chart.source,
-                loaded_candles: chart.candles.len(),
                 indicators: &mut chart.indicators,
                 card: &mut chart.chart,
                 scale_mode: chart.scale_mode,
@@ -156,6 +155,7 @@ mod tests {
         look.bullish = [9, 8, 7];
         look.canvas.background.mode = BackgroundMode::Gradient;
         look.canvas.margins.right = 21;
+        look.canvas.bar_countdown = false;
         look.style.chart_type = crate::model::ChartType::Renko;
         let message = workspace.apply_appearance_to_all(ids[0], &look, ApplyScope::ColorsAndCanvas);
         assert_eq!(message, "Applied the appearance to 2 charts.");

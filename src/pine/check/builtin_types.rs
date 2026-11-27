@@ -18,6 +18,7 @@ const FLOAT_SERIES: &[&str] = &[
     "ohlc4",
     "hlcc4",
     "ta.tr",
+    "ta.vwap",
     "strategy.position_size",
     "strategy.position_avg_price",
     "strategy.equity",
@@ -187,7 +188,7 @@ fn series_result(name: &str) -> Option<ValueType> {
         "table.new" => Some(ValueType::Table),
         "linefill.new" => Some(ValueType::Linefill),
         "polyline.new" => Some(ValueType::Polyline),
-        "array.from" | "array.copy" | "array.slice" | "ta.pivot_point_levels" => {
+        "array.from" | "array.copy" | "array.slice" | "str.split" | "ta.pivot_point_levels" => {
             Some(ValueType::Array)
         }
         _ if is_ta_float(name) => Some(ValueType::Float),
@@ -279,6 +280,16 @@ fn propagating_result(name: &str) -> Option<ValueType> {
     }
 }
 
+/// How many values a builtin returns when it returns a tuple (`ta.macd` gives three), None for the
+/// rest. The runtime builds each of these as a `RuntimeValue::Tuple` of that length.
+pub fn tuple_arity(name: &str) -> Option<usize> {
+    match name {
+        "ta.supertrend" => Some(2),
+        "ta.macd" | "ta.dmi" | "ta.bb" | "ta.kc" => Some(3),
+        _ => None,
+    }
+}
+
 /// Result of calling `name`, given the inferred argument types and their combined qualifier.
 pub fn call(
     name: &str,
@@ -335,22 +346,5 @@ fn is_numeric(kind: &ValueType) -> bool {
 
 /// The source-spelling of a value type, for diagnostics (`int`, `float`, …).
 pub fn value_type_name(kind: ValueType) -> &'static str {
-    match kind {
-        ValueType::Int => "int",
-        ValueType::Float => "float",
-        ValueType::Bool => "bool",
-        ValueType::String => "string",
-        ValueType::Color => "color",
-        ValueType::Line => "line",
-        ValueType::Label => "label",
-        ValueType::Box => "box",
-        ValueType::Table => "table",
-        ValueType::Linefill => "linefill",
-        ValueType::Polyline => "polyline",
-        ValueType::Array => "array",
-        ValueType::Object => "object",
-        ValueType::Map => "map",
-        ValueType::Matrix => "matrix",
-        ValueType::Time => "time",
-    }
+    kind.name()
 }

@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use super::fast_hash::FastMap;
 use super::types::RuntimeFunction;
 use crate::model::Kline;
+use crate::model::market::bucket::Grid;
 use crate::pine::compiler::program::{CompiledProgram, Import};
 use crate::pine::syntax::ast::{EnumMember, Expression, Parameter, Statement, TypeField};
 
@@ -55,6 +56,13 @@ pub trait SecurityDataProvider: Send {
     fn candles_over(&self, key: &SecurityKey, chart: ChartSpan) -> Option<Vec<Kline>> {
         let _ = chart;
         self.candles(key)
+    }
+
+    /// Where `symbol`'s market cuts its buckets, so a higher timeframe of it closes where its
+    /// candles do (a stock's day at the close, not at midnight). The UTC grid unless said.
+    fn grid(&self, symbol: &str) -> Grid {
+        let _ = symbol;
+        Grid::Utc
     }
 }
 
@@ -174,6 +182,7 @@ impl LibraryLinkage {
                             .map(|p| self.canonical(p, key, &declared_types))
                             .collect(),
                         body.clone(),
+                        statement.range().start.offset,
                     );
                     function.scope = Some(key.to_owned());
                     function.is_exported = library.exported_names.contains(name);

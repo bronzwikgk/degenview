@@ -15,8 +15,8 @@
 
 - Timeframes: a tool's `timeframe` is a string read by `Timeframe::parse` through
   `chart::control::parse_timeframe`: a count and a unit (`m` minutes, `h` hours, `D` days, `W` weeks,
-  `M` months, or `1Y`; `15m`, `4h`, `1D`, `2W`, `3M`), and the old `1H` still reads. A refused one is
-  an `INVALID_ARGUMENT` with the parse message (`Seconds aren't supported`, `Minutes go from 1 to
+  `M` months, `s` seconds, or `1Y`; `30s`, `15m`, `4h`, `1D`, `2W`, `3M`), and the old `1H` still reads. A refused one is
+  an `INVALID_ARGUMENT` with the parse message (`Seconds go from 1 to 59`, `Minutes go from 1 to
   1440`) and the grammar (`TIMEFRAME_GRAMMAR`, which the tool descriptions repeat). Results write the
   app's label (`Timeframe::label`: `1h`, `22m`, `2D`). A source with no such candle builds it from
   finer ones or the chart shows why it cannot (see [Market data](market-data.md#timeframes)).
@@ -90,6 +90,10 @@ entry and `McpCommand::domain` arm), its arms in the app's `run_mcp_command` and
   `host::mcp::<domain>::describe` with a summary from `host::mcp::confirmation`, from what the app
   knows of the target, never agent text (missing target: own error, unasked); add its tool to
   `confirm::GATED_TOOLS`; say so in the tool description.
+- A summary names its action with a `model::mcp::operation::Operation`, never a string:
+  `Operation::wire` is the English line a client is told and the log keeps, `label` and `question`
+  are the user's words in the language in use. The target and note are written with `tr!` by whoever
+  builds the summary; a new command adds a variant with all three.
 - The gate runs on the app thread before dispatch, never waits: it answers `CONFIRMATION_REQUIRED`
   and the agent repeats the call. An approval is consumed by its call; never widen it beyond the
   exact command and client. An "all" command records what it resolved to in `Summary::with_scope`,

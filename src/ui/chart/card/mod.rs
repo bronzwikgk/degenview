@@ -6,8 +6,10 @@
 
 use crate::format;
 use crate::host::pine::chart::{ChartFrame, ChartRuns, InstanceStatus, PineLogs, RunRevision};
+use crate::i18n::tr;
 use crate::model::chart;
 use crate::model::chart::canvas::{PaneSpec, Window};
+use crate::model::chart::countdown::{self, Countdown};
 use crate::model::chart::kind::{ChartStyle, ChartType, DataClass};
 use crate::model::chart::look::Palette;
 use crate::model::chart::price_scale::PriceScaleMode;
@@ -128,6 +130,7 @@ pub struct CrosshairInfo {
 pub use context::ContextRequest;
 use crosshair::{CrosshairBars, READOUT_MARGIN, READOUT_PAD, READOUT_ROW_GAP};
 use live_overlays::LiveOverlays;
+use overlays::TagBand;
 use price_scale::tick_step;
 pub(in crate::ui) use price_scale::{AxisTicks, PriceScale};
 use scripts::{draw_script_pane, pane_labels};
@@ -170,14 +173,17 @@ fn truncated(label: &str, max: usize) -> String {
 /// What the warning pill says: rate limits get their own wording, `detailed` appends the error.
 fn refresh_warning_text(error: &ProviderError, source: DataSource, detailed: bool) -> String {
     if error.is_rate_limited() {
-        format!(
-            "{} rate limit reached · showing the last result",
-            source.display_name()
+        tr!(
+            "{source} rate limit reached · showing the last result",
+            source = source.display_name()
         )
     } else if detailed {
-        format!("Couldn't refresh · showing the last result ({error})")
+        tr!(
+            "Couldn't refresh · showing the last result ({error})",
+            error = error
+        )
     } else {
-        "Couldn't refresh · showing the last result".to_owned()
+        tr!("Couldn't refresh · showing the last result").to_owned()
     }
 }
 
@@ -322,10 +328,15 @@ pub struct ChartCard {
     drawn_type: ChartType,
     /// The workspace's timeframe, for the watermark.
     timeframe: Option<Timeframe>,
+    /// The time the forming bar has left, which the workspace works out each frame from the
+    /// chart's data and the clock. The card draws it and never looks at either.
+    countdown: Option<Countdown>,
     /// The script pane that fills the chart, if one does. View state, not saved.
     maximized_pane: Option<u64>,
     /// The scripts that had a pane at the last frame, top to bottom.
     pane_ids: Vec<u64>,
+    /// The line between panes being dragged. View state, not saved.
+    pane_drag: Option<pane_divider::PaneDrag>,
     /// The time a vertical cursor line is locked at (context menu). View state, not saved: it is
     /// not a drawing, and it follows neither templates nor linked charts.
     time_lock: Option<i64>,
@@ -433,8 +444,10 @@ impl Default for ChartCard {
             constructed: None,
             drawn_type: ChartType::Candles,
             timeframe: None,
+            countdown: None,
             maximized_pane: None,
             pane_ids: Vec::new(),
+            pane_drag: None,
             time_lock: None,
             bar_marker: None,
             logs_range: None,
@@ -514,6 +527,12 @@ impl ChartCard {
 
     pub fn set_timeframe(&mut self, timeframe: Timeframe) {
         self.timeframe = Some(timeframe);
+    }
+
+    /// The time the forming bar has left, or `None` where there is nothing to promise (see
+    /// [`Countdown::resolve`]). What the last-price tag shows, and what a snapshot freezes.
+    pub fn set_countdown(&mut self, countdown: Option<Countdown>) {
+        self.countdown = countdown;
     }
 
     /// The change across the candles on screen, by the same window the plot draws.
@@ -791,6 +810,7 @@ mod navigation;
 mod overlay_card;
 mod overlays;
 mod paint;
+mod pane_divider;
 mod price_scale;
 mod scripts;
 mod snapshot;
@@ -807,6 +827,8 @@ mod time_lock;
 
 #[cfg(test)]
 mod canvas_tests;
+#[cfg(test)]
+mod countdown_tests;
 #[cfg(test)]
 mod overlay_tests;
 #[cfg(test)]

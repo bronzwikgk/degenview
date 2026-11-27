@@ -1,3 +1,4 @@
+mod cjk;
 #[cfg(test)]
 mod fonts_tests;
 
@@ -18,9 +19,9 @@ impl AppTheme {
 
     pub fn title(self) -> &'static str {
         match self {
-            Self::System => "System",
-            Self::Light => "Light",
-            Self::Dark => "Dark",
+            Self::System => crate::i18n::tr!("System"),
+            Self::Light => crate::i18n::tr!("Light"),
+            Self::Dark => crate::i18n::tr!("Dark"),
         }
     }
 
@@ -340,7 +341,6 @@ fn pick_alpha(dark: f32, light: f32) -> f32 {
 pub const UP: Color32 = Color32::from_rgb(23, 201, 114);
 pub const DOWN: Color32 = Color32::from_rgb(245, 72, 76);
 pub const ACCENT: Color32 = Color32::from_rgb(191, 82, 203);
-pub const RSI: Color32 = Color32::from_rgb(160, 130, 255);
 pub const EMA: Color32 = Color32::from_rgb(255, 165, 0);
 pub const BOLLINGER: Color32 = Color32::from_rgb(0, 200, 255);
 /// Marks a time-travelled chart: replay bar, plot border and badge.
@@ -524,7 +524,8 @@ pub const SYSTEM_ACCENT: Color32 = Color32::from_rgb(10, 132, 255);
 /// system monospace font (SF Mono) first in the monospace one. The fonts egui ships stay as glyph
 /// fallbacks, and a machine without SF Mono simply keeps them. STIX Two Math and Apple Symbols go last
 /// in both families so characters the others lack — "𝓑𝓾𝔂" and other math alphanumerics, arrows,
-/// geometric shapes — draw instead of showing tofu squares.
+/// geometric shapes — draw instead of showing tofu squares. A language written in Han characters adds
+/// the system's font for them (`cjk`).
 fn base_fonts() -> egui::FontDefinitions {
     let mut fonts = egui::FontDefinitions::default();
     fonts
@@ -567,17 +568,39 @@ fn base_fonts() -> egui::FontDefinitions {
             }
         }
     }
+    if let Some(data) = cjk::system_font(crate::i18n::current(), INTER) {
+        fonts
+            .font_data
+            .insert("han".to_owned(), std::sync::Arc::new(data));
+        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+            fonts
+                .families
+                .entry(family)
+                .or_default()
+                .push("han".to_owned());
+        }
+    }
     add_symbol_fallback(&mut fonts);
     fonts
 }
 
+const INTER: &[u8] = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+
 /// Inter Regular (`assets/fonts`, SIL OFL 1.1; the licence and where the file comes from are in
 /// `assets/fonts/README.md`): the font of the app's text on every platform.
+///
+/// Drawn unhinted: on a 1x screen egui's grid-fitting rounds Inter's x-height and cap height up to
+/// whole pixels (a 13 px line gains a pixel of height and some weight), so text looks stretched
+/// compared with a 2x screen. Unhinted keeps the font's own proportions at any scale.
 pub fn bundled_ui_font() -> std::sync::Arc<egui::FontData> {
     static FONT: std::sync::OnceLock<std::sync::Arc<egui::FontData>> = std::sync::OnceLock::new();
-    const INTER: &[u8] = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
-    FONT.get_or_init(|| std::sync::Arc::new(egui::FontData::from_static(INTER)))
-        .clone()
+    FONT.get_or_init(|| {
+        std::sync::Arc::new(egui::FontData::from_static(INTER).tweak(egui::FontTweak {
+            hinting: Some(false),
+            ..Default::default()
+        }))
+    })
+    .clone()
 }
 
 /// The app's fonts without the editor's choice, read from the system once.

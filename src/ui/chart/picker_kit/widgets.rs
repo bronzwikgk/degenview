@@ -5,6 +5,7 @@ use super::art;
 use super::artwork::{prediction_icon, result_icon};
 use super::recents::RecentMarket;
 use super::results::{result_row, same_market};
+use crate::i18n::tr;
 use crate::model::DataSource;
 use crate::service::SearchResult;
 use crate::ui::icons::{self, Icon};
@@ -46,11 +47,11 @@ pub(crate) fn recents_card(
     let mut clear = false;
     card(ui, |ui| {
         ui.horizontal(|ui| {
-            caption_label(ui, Icon::ClockArrow, "Recent");
+            caption_label(ui, Icon::ClockArrow, tr!("Recent"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let clear_button = ui.add(
                     egui::Label::new(text(
-                        "Clear",
+                        tr!("Clear"),
                         size::CAPTION + 0.5,
                         400.0,
                         theme::text_secondary(),
@@ -78,7 +79,7 @@ pub(crate) fn recents_card(
                     let is_selected = selected.is_some_and(|picked| same_market(picked, &result));
                     let response = result_row(ui, &result, is_selected, true, column);
                     response.context_menu(|ui| {
-                        if ui.button("Remove from Recent").clicked() {
+                        if ui.button(tr!("Remove from Recent")).clicked() {
                             remove = Some(row * RECENT_COLUMNS as usize + offset);
                             ui.close();
                         }
@@ -155,8 +156,8 @@ pub(crate) fn provider_menu(ui: &mut Ui, provider: DataSource) -> Option<DataSou
     let width = 12.0 + 18.0 + 8.0 + name.size().x + 8.0 + 9.0 + 12.0;
     let (rect, response) =
         ui.allocate_exact_size(vec2(width, kit::search_box::HEIGHT), Sense::click());
-    let response = crate::ui::accessibility::label(response, "Prediction market provider")
-        .on_hover_text("Prediction market provider")
+    let response = crate::ui::accessibility::label(response, tr!("Prediction market provider"))
+        .on_hover_text(tr!("Prediction market provider"))
         .on_hover_cursor(egui::CursorIcon::PointingHand);
     let painter = ui.painter();
     painter.rect_filled(
@@ -259,14 +260,21 @@ pub(crate) fn no_results(ui: &mut Ui, title: &str, detail: &str) {
         theme::text_primary(),
         rect.width() - 40.0,
     );
-    let detail = galley_words(
-        ui,
+    // A sentence, not a label: it wraps and is centred, whatever the language's length.
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
         detail,
-        size::BODY,
-        400.0,
-        theme::text_secondary(),
-        rect.width() - 40.0,
+        0.0,
+        egui::TextFormat {
+            font_id: FontId::proportional(size::BODY),
+            color: theme::text_secondary(),
+            coords: egui::epaint::text::VariationCoords::new([("wght", 400.0)]),
+            ..Default::default()
+        },
     );
+    job.wrap.max_width = (rect.width() - 40.0).max(1.0);
+    job.halign = egui::Align::Center;
+    let detail = ui.painter().layout_job(job);
     let total = 40.0 + 14.0 + title.size().y + 6.0 + detail.size().y;
     let mut y = rect.center().y - total / 2.0 - 10.0;
     icons::paint(
@@ -282,11 +290,7 @@ pub(crate) fn no_results(ui: &mut Ui, title: &str, detail: &str) {
         theme::text_primary(),
     );
     y += title.size().y + 6.0;
-    painter.galley(
-        pos2(rect.center().x - detail.size().x / 2.0, y),
-        detail,
-        theme::text_secondary(),
-    );
+    painter.galley(pos2(rect.center().x, y), detail, theme::text_secondary());
 }
 
 /// What the footer calls a pick: the event for several ticked choices, else the market.
@@ -323,7 +327,7 @@ pub(crate) fn selected_banner(ui: &mut Ui, result: &SearchResult, max_width: f32
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     ui.label(text(
-                        "Selected",
+                        tr!("Selected"),
                         size::CAPTION,
                         400.0,
                         theme::text_secondary(),

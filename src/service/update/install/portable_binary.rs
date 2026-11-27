@@ -21,6 +21,7 @@
 #[cfg_attr(not(windows), allow(unused_imports))]
 use super::forwarded_env;
 use super::{Progress, STAGING_NAME, Stage, is_writable, keep_only_copy, swap_paths, verify};
+use crate::i18n::tr;
 use crate::service::update::check::{Release, ReleaseAsset};
 use crate::service::update::{archive, download, tag_signature};
 use std::ffi::OsString;
@@ -56,7 +57,7 @@ impl Prepared {
 pub fn install_target() -> Result<PathBuf, String> {
     // The app cannot replace itself in the sandbox, and does not know where it was installed from.
     if crate::service::system::sandbox::is_flatpak() {
-        return Err(crate::service::system::sandbox::FLATPAK_UPDATE_NOTE.to_owned());
+        return Err(crate::service::system::sandbox::flatpak_update_note().to_owned());
     }
     let exe = std::env::current_exe()
         .and_then(|exe| exe.canonicalize())
@@ -82,19 +83,21 @@ pub(super) fn plain(path: &Path) -> PathBuf {
 /// (`cargo run` under `source_root`), which must never replace itself with a release.
 fn target_for(exe: &Path, source_root: &Path) -> Result<PathBuf, String> {
     if exe.starts_with(source_root) {
-        return Err("A development build does not update itself.".to_owned());
+        return Err(tr!("A development build does not update itself.").to_owned());
     }
-    let parent = exe.parent().ok_or("The app has no parent folder.")?;
+    let parent = exe.parent().ok_or(tr!("The app has no parent folder."))?;
     if !is_writable(parent) {
-        return Err(format!(
-            "{} is not writable. {}",
-            parent.display(),
-            if cfg!(windows) {
-                "Move DegenView to a folder you own, such as Documents."
-            } else {
-                "Install DegenView in a folder you own, such as ~/.local/bin."
-            }
-        ));
+        return Err(if cfg!(windows) {
+            tr!(
+                "{folder} is not writable. Move DegenView to a folder you own, such as Documents.",
+                folder = parent.display()
+            )
+        } else {
+            tr!(
+                "{folder} is not writable. Install DegenView in a folder you own, such as ~/.local/bin.",
+                folder = parent.display()
+            )
+        });
     }
     Ok(exe.to_path_buf())
 }
@@ -110,15 +113,20 @@ pub fn prepare(
     let asset = release
         .asset
         .as_ref()
-        .ok_or("This release has no download for this computer.")?;
+        .ok_or(tr!("This release has no download for this computer."))?;
     progress(Progress::new(Stage::Verifying));
     tag_signature::verify_release_tag(&release.tag).map_err(|error| error.to_string())?;
-    let parent = exe.parent().ok_or("The app has no parent folder.")?;
+    let parent = exe.parent().ok_or(tr!("The app has no parent folder."))?;
     let staging = parent.join(STAGING_NAME);
     keep_only_copy(&staging, exe)?;
     let _ = std::fs::remove_dir_all(&staging);
-    std::fs::create_dir(&staging)
-        .map_err(|error| format!("Could not create {STAGING_NAME}: {error}"))?;
+    std::fs::create_dir(&staging).map_err(|error| {
+        tr!(
+            "Could not create {name}: {error}",
+            name = STAGING_NAME,
+            error = error
+        )
+    })?;
     prepare_in(&staging, exe, asset, progress).inspect_err(|_| {
         let _ = std::fs::remove_dir_all(&staging);
     })
@@ -179,15 +187,26 @@ pub fn apply(prepared: &Prepared) -> Result<(), String> {
 /// Starts the new exe, which waits for this process to exit before it opens anything. Call it when
 /// exit is certain; the exe is already in place, so a failure only means nobody reopens the app.
 pub fn relaunch(prepared: &Prepared) -> Result<(), String> {
-    spawn_relaunch(prepared)
-        .map_err(|error| format!("Updated, but could not restart: {error}. Reopen DegenView."))
+    spawn_relaunch(&prepared.exe).map_err(|error| {
+        tr!(
+            "Updated, but could not restart: {error}. Reopen DegenView.",
+            error = error
+        )
+    })
+}
+
+/// Starts the running exe again, which waits for this process to exit before it opens anything, for a
+/// change that only applies at startup. Call it when exit is certain, as for `relaunch`.
+pub fn relaunch_running_app() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    spawn_relaunch(&exe).map_err(|error| error.to_string())
 }
 
 fn swap(prepared: &Prepared) -> Result<(), String> {
     let name = prepared
         .exe
         .file_name()
-        .ok_or("The app has no file name.")?;
+        .ok_or(tr!("The app has no file name."))?;
     let old = prepared.staging.join("old").join(name);
     std::fs::create_dir_all(old.parent().expect("old has a parent"))
         .map_err(|error| error.to_string())?;
@@ -256,7 +275,7 @@ fn relaunch_command(exe: &Path, pid: u32, environment: Environment) -> std::proc
 }
 
 #[cfg(windows)]
-fn spawn_relaunch(prepared: &Prepared) -> std::io::Result<()> {
+fn spawn_relaunch(exe: &Path) -> std::io::Result<()> {
     use std::os::windows::process::CommandExt;
     use std::process::Stdio;
 
@@ -264,7 +283,7 @@ fn spawn_relaunch(prepared: &Prepared) -> std::io::Result<()> {
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
     relaunch_command(
-        &prepared.exe,
+        exe,
         std::process::id(),
         Environment::Only(forwarded_env(std::env::vars_os(), FORWARDED_ENV)),
     )
@@ -277,13 +296,13 @@ fn spawn_relaunch(prepared: &Prepared) -> std::io::Result<()> {
 }
 
 #[cfg(unix)]
-fn spawn_relaunch(prepared: &Prepared) -> std::io::Result<()> {
+fn spawn_relaunch(exe: &Path) -> std::io::Result<()> {
     use std::os::unix::process::CommandExt;
     use std::process::Stdio;
 
     // Its own process group, so closing the terminal this one was started from does not take it
     // down with the old process.
-    relaunch_command(&prepared.exe, std::process::id(), Environment::Inherit)
+    relaunch_command(exe, std::process::id(), Environment::Inherit)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -304,8 +323,9 @@ fn predecessor_pid(args: impl Iterator<Item = OsString>) -> Option<u32> {
 }
 
 /// What the new process says when the one it replaces never exited.
-const PREDECESSOR_RUNNING: &str =
-    "The previous DegenView is still running. Close it, then open DegenView again.";
+fn predecessor_running() -> &'static str {
+    tr!("The previous DegenView is still running. Close it, then open DegenView again.")
+}
 
 /// Run first thing at startup: when an update started this process, waits (at most
 /// `RELAUNCH_WAIT_MS`) for the one it replaces to exit, so the database is not opened twice. Fails
@@ -341,9 +361,10 @@ fn wait_for_pid(pid: u32, millis: u32) -> Result<(), String> {
     unsafe { CloseHandle(handle) };
     match result {
         WAIT_OBJECT_0 => Ok(()),
-        WAIT_TIMEOUT => Err(PREDECESSOR_RUNNING.to_owned()),
-        other => Err(format!(
-            "Could not wait for the previous DegenView to exit (wait returned {other:#x})."
+        WAIT_TIMEOUT => Err(predecessor_running().to_owned()),
+        other => Err(tr!(
+            "Could not wait for the previous DegenView to exit (wait returned {code}).",
+            code = format!("{other:#x}")
         )),
     }
 }
@@ -359,7 +380,7 @@ pub fn wait_for_predecessor() -> Result<(), String> {
                 std::time::Duration::from_millis(RELAUNCH_WAIT_MS.into()),
             ) =>
         {
-            Err(PREDECESSOR_RUNNING.to_owned())
+            Err(predecessor_running().to_owned())
         }
         _ => Ok(()),
     }
@@ -753,7 +774,7 @@ mod tests {
         let waited = wait_for_pid(stays.id(), 300);
         let _ = stays.kill();
         let _ = stays.wait();
-        assert_eq!(waited, Err(PREDECESSOR_RUNNING.to_owned()));
+        assert_eq!(waited, Err(predecessor_running().to_owned()));
         // A pid that is gone (the child just killed and reaped) is fine.
         assert_eq!(wait_for_pid(stays.id(), 300), Ok(()));
     }

@@ -10,6 +10,7 @@
 //! Unlike the mock-up this follows, nothing here is blue: a card that is on is marked by a lighter
 //! fill and a neutral outline.
 
+use crate::i18n::{tr, tr_c};
 use crate::model::tab::link::{LinkColor, LinkKind, LinkToggles};
 use crate::ui::icons::{self, Icon};
 use crate::ui::kit::{self, REGULAR, SEMIBOLD, size};
@@ -19,7 +20,7 @@ use eframe::egui::{
     pos2, vec2,
 };
 
-/// The room the section needs inside the menu; the menu is made at least this wide.
+/// The section's usual width inside the menu; [`width`] is what it needs in the language in use.
 pub const WIDTH: f32 = 332.0;
 /// Space between the section's edge and its cards.
 const PAD: f32 = 12.0;
@@ -31,6 +32,10 @@ const GAP: f32 = 8.0;
 /// Distance between the centres of two swatches, and their drawn size.
 const PITCH: f32 = 21.0;
 const SWATCH: f32 = 14.0;
+/// The nine swatches in a row, edge to edge.
+const SWATCH_RUN: f32 = PITCH * 8.0 + SWATCH;
+/// Space inside the Link Color card, and the least between its label and the swatches.
+const CARD_PAD: f32 = 12.0;
 const SWITCH: egui::Vec2 = vec2(32.0, 18.0);
 const PICTURE: f32 = 78.0;
 
@@ -69,10 +74,10 @@ fn check_color(color: LinkColor) -> Color32 {
 /// What a row's info icon says.
 pub fn explanation(kind: Row) -> &'static str {
     match kind {
-        Row::Symbol => "Keep the same symbol across linked tabs.",
-        Row::Interval => "Keep the same chart interval across linked tabs.",
-        Row::Time => "Keep linked charts aligned to the same point in time.",
-        Row::DateRange => "Keep linked charts displaying the same date range.",
+        Row::Symbol => tr!("Keep the same symbol across linked tabs."),
+        Row::Interval => tr!("Keep the same chart interval across linked tabs."),
+        Row::Time => tr!("Keep linked charts aligned to the same point in time."),
+        Row::DateRange => tr!("Keep linked charts displaying the same date range."),
     }
 }
 
@@ -89,10 +94,20 @@ impl Row {
 
     fn title(self) -> &'static str {
         match self {
-            Self::Symbol => "Symbol",
-            Self::Interval => "Interval",
-            Self::Time => "Time",
-            Self::DateRange => "Date range",
+            Self::Symbol => tr!("Symbol"),
+            Self::Interval => tr!("Interval"),
+            Self::Time => tr!("Time"),
+            Self::DateRange => tr!("Date range"),
+        }
+    }
+
+    /// What ids are made from: the same in every language.
+    fn key(self) -> &'static str {
+        match self {
+            Self::Symbol => "symbol",
+            Self::Interval => "interval",
+            Self::Time => "time",
+            Self::DateRange => "date-range",
         }
     }
 
@@ -124,6 +139,24 @@ impl Row {
     }
 }
 
+/// How wide the section is: its usual width, or what the Link Color card needs for its label to
+/// stand clear of the swatches. The menu is made at least this wide.
+pub fn width(ui: &Ui) -> f32 {
+    let label = color_label(ui, f32::INFINITY).size().x;
+    WIDTH.max(2.0 * PAD + 3.0 * CARD_PAD + label + SWATCH_RUN)
+}
+
+fn color_label(ui: &Ui, max_width: f32) -> std::sync::Arc<egui::Galley> {
+    kit::galley(
+        ui,
+        tr!("Link Color"),
+        size::BODY,
+        REGULAR,
+        theme::text_primary(),
+        max_width,
+    )
+}
+
 /// Draws the section for a tab tagged `color`, whose group has `toggles`. Returns the change when
 /// the user made one. Done closes the menu it is in.
 pub fn show(ui: &mut Ui, color: Option<LinkColor>, toggles: LinkToggles) -> Option<TabLinkEdit> {
@@ -140,7 +173,7 @@ pub fn show(ui: &mut Ui, color: Option<LinkColor>, toggles: LinkToggles) -> Opti
     // chosen one is chosen again) the rest of the section is not there.
     if let Some(color) = color {
         ui.add_space(10.0);
-        caption(ui, "Sync what");
+        caption(ui, tr!("Sync what"));
         let mut next = toggles;
         for pair in Row::ALL.chunks(2) {
             let (rect, _) = ui.allocate_exact_size(vec2(width, OPTION + GAP), Sense::hover());
@@ -169,12 +202,12 @@ pub fn show(ui: &mut Ui, color: Option<LinkColor>, toggles: LinkToggles) -> Opti
 /// The title and what the section is for.
 fn header(ui: &mut Ui, width: f32) {
     let (rect, response) = ui.allocate_exact_size(vec2(width, HEADER), Sense::hover());
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, "Link Tabs"));
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, tr!("Link Tabs")));
     let left = rect.left() + PAD + 2.0;
     let room = rect.right() - PAD - left;
     let title = kit::galley(
         ui,
-        "Link Tabs",
+        tr!("Link Tabs"),
         size::HEADLINE + 2.0,
         SEMIBOLD,
         theme::text_primary(),
@@ -182,7 +215,7 @@ fn header(ui: &mut Ui, width: f32) {
     );
     let subtitle = kit::paragraph(
         ui,
-        "Sync this tab\u{2019}s charts with other tabs.",
+        tr!("Sync this tab\u{2019}s charts with other tabs."),
         size::SUBHEADLINE,
         REGULAR,
         theme::text_secondary(),
@@ -240,22 +273,17 @@ fn color_card(ui: &mut Ui, width: f32, current: Option<LinkColor>) -> Option<Opt
         theme::card_fill(false),
         Stroke::new(1.0, theme::card_border(false)),
     );
-    let label = kit::galley(
-        ui,
-        "Link Color",
-        size::BODY,
-        REGULAR,
-        theme::text_primary(),
-        card.width() / 2.0,
-    );
+    let label = color_label(ui, card.width() - SWATCH_RUN - 3.0 * CARD_PAD);
     ui.painter().galley(
-        pos2(card.left() + 12.0, card.center().y - label.size().y / 2.0),
+        pos2(
+            card.left() + CARD_PAD,
+            card.center().y - label.size().y / 2.0,
+        ),
         label,
         theme::text_primary(),
     );
     let mut picked = None;
-    let run = PITCH * 8.0 + SWATCH;
-    let first = card.right() - 12.0 - run + SWATCH / 2.0;
+    let first = card.right() - CARD_PAD - SWATCH_RUN + SWATCH / 2.0;
     for (index, color) in LinkColor::ALL.into_iter().enumerate() {
         let center = pos2(first + index as f32 * PITCH, card.center().y);
         let hit = Rect::from_center_size(center, vec2(PITCH - 1.0, PITCH - 1.0));
@@ -266,7 +294,10 @@ fn color_card(ui: &mut Ui, width: f32, current: Option<LinkColor>) -> Option<Opt
             Sense::click(),
         );
         let name = if selected {
-            format!("{}, selected. Choose again to unlink", color.title())
+            tr!(
+                "{color}, selected. Choose again to unlink",
+                color = color.title()
+            )
         } else {
             color.title().to_owned()
         };
@@ -274,7 +305,7 @@ fn color_card(ui: &mut Ui, width: f32, current: Option<LinkColor>) -> Option<Opt
             WidgetInfo::selected(WidgetType::RadioButton, true, selected, name.clone())
         });
         let response = response.on_hover_text(if selected {
-            format!("{} (click to unlink)", color.title())
+            tr!("{color} (click to unlink)", color = color.title())
         } else {
             color.title().to_owned()
         });
@@ -318,7 +349,7 @@ fn color_card(ui: &mut Ui, width: f32, current: Option<LinkColor>) -> Option<Opt
 fn option_card(ui: &mut Ui, rect: Rect, row: Row, on: &mut bool) -> bool {
     let response = ui.interact(
         rect,
-        Id::new(("tab-link-option", row.title())),
+        Id::new(("tab-link-option", row.key())),
         Sense::click(),
     );
     let tip = explanation(row);
@@ -365,7 +396,8 @@ fn option_card(ui: &mut Ui, rect: Rect, row: Row, on: &mut bool) -> bool {
         row.icon(),
         icon_color,
     );
-    let label = kit::galley(
+    // Wraps in a language that writes it longer: the card is tall enough for two lines.
+    let label = kit::paragraph(
         ui,
         row.title(),
         size::BODY,
@@ -380,7 +412,7 @@ fn option_card(ui: &mut Ui, rect: Rect, row: Row, on: &mut bool) -> bool {
     );
     let progress = ui
         .ctx()
-        .animate_bool(Id::new(("tab-link-switch", row.title())), *on);
+        .animate_bool(Id::new(("tab-link-switch", row.key())), *on);
     let switch = Rect::from_center_size(
         pos2(rect.right() - 10.0 - SWITCH.x / 2.0, rect.center().y),
         SWITCH,
@@ -391,7 +423,23 @@ fn option_card(ui: &mut Ui, rect: Rect, row: Row, on: &mut bool) -> bool {
 
 /// Two small tabs joined by an arrow, in the group's colour, and what linking does.
 fn picture(ui: &mut Ui, width: f32, color: LinkColor) {
-    let (outer, _) = ui.allocate_exact_size(vec2(width, PICTURE), Sense::hover());
+    // The words decide the card's height when a language runs longer than English.
+    let window = vec2(52.0, 44.0);
+    let divider_offset = PAD + 12.0 + window.x + 30.0 + window.x + 10.0;
+    let text = kit::paragraph(
+        ui,
+        tr!(
+            "Changes you make (e.g. symbol) will be synced to other linked tabs with the same link color."
+        ),
+        size::SUBHEADLINE,
+        REGULAR,
+        theme::text_secondary(),
+        width - PAD - 10.0 - (divider_offset + 10.0),
+    );
+    let (outer, _) = ui.allocate_exact_size(
+        vec2(width, PICTURE.max(text.size().y + 2.0 * PAD)),
+        Sense::hover(),
+    );
     let card = outer.shrink2(vec2(PAD, 0.0));
     paint_card(
         ui,
@@ -400,7 +448,6 @@ fn picture(ui: &mut Ui, width: f32, color: LinkColor) {
         Stroke::new(1.0, theme::card_border(false)),
     );
     let accent = swatch(color);
-    let window = vec2(52.0, 44.0);
     let top = card.center().y - window.y / 2.0;
     let first = Rect::from_min_size(pos2(card.left() + 12.0, top), window);
     let second = Rect::from_min_size(pos2(first.right() + 30.0, top), window);
@@ -421,14 +468,6 @@ fn picture(ui: &mut Ui, width: f32, color: LinkColor) {
         divider,
         (card.top() + 14.0)..=(card.bottom() - 14.0),
         Stroke::new(1.0, theme::separator()),
-    );
-    let text = kit::paragraph(
-        ui,
-        "Changes you make (e.g. symbol) will be synced to other linked tabs with the same link color.",
-        size::SUBHEADLINE,
-        REGULAR,
-        theme::text_secondary(),
-        card.right() - 10.0 - (divider + 10.0),
     );
     ui.painter().galley(
         pos2(divider + 10.0, card.center().y - text.size().y / 2.0),
@@ -486,21 +525,21 @@ fn mini_tab(ui: &Ui, rect: Rect, accent: Color32) {
 pub fn describe(toggles: LinkToggles) -> String {
     let mut parts = Vec::new();
     if toggles.enables(LinkKind::Symbol) {
-        parts.push("symbol");
+        parts.push(tr_c!("what a link syncs, in a list", "symbol"));
     }
     if toggles.interval {
-        parts.push("interval");
+        parts.push(tr_c!("what a link syncs, in a list", "interval"));
     }
     if toggles.time {
-        parts.push("time");
+        parts.push(tr_c!("what a link syncs, in a list", "time"));
     }
     if toggles.date_range {
-        parts.push("date range");
+        parts.push(tr_c!("what a link syncs, in a list", "date range"));
     }
     if parts.is_empty() {
-        "nothing synced".to_owned()
+        tr!("nothing synced").to_owned()
     } else {
-        parts.join(", ")
+        crate::i18n::join_list(&parts)
     }
 }
 

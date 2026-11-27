@@ -3,6 +3,7 @@
 
 use super::extra;
 use crate::pine::builtins::array::{Bound, new_array};
+use crate::pine::builtins::market_values;
 use crate::pine::runtime::session::Session;
 use crate::pine::runtime::types::RuntimeContext;
 use crate::pine::runtime::value::RuntimeValue;
@@ -63,6 +64,7 @@ impl Session {
         let source = |key: &str| bound.get(key).unwrap_or(&na).clone();
         let key = self.site_key(site, context);
         let bar = context.bar.clone();
+        let previous_close = market_values::previous_close(&self.working);
         let state = self.working.ta_states.entry(key).or_default();
         let value = match name {
             "ta.alma" => extra::alma(
@@ -113,6 +115,7 @@ impl Session {
                         .and_then(RuntimeValue::bool)
                         .unwrap_or(true),
                     &bar,
+                    previous_close,
                     state,
                 );
                 let float =
@@ -128,6 +131,7 @@ impl Session {
                     .and_then(RuntimeValue::bool)
                     .unwrap_or(true),
                 &bar,
+                previous_close,
                 state,
             ),
             "ta.bbw" => extra::bollinger_width(
@@ -143,6 +147,16 @@ impl Session {
                     .and_then(RuntimeValue::text_value)
                     .unwrap_or("");
                 let flag = |key: &str| bound.get(key).and_then(RuntimeValue::bool).unwrap_or(false);
+                if kind == "Woodie" && flag("developing") {
+                    // Woodie's pivot weighs the open of the period that follows, which a running
+                    // period does not have yet. TradingView stops the script (RE10128).
+                    return Err(Diagnostic::error(
+                        "PINE4035",
+                        DiagnosticCategory::Runtime,
+                        "ta.pivot_point_levels: the Woodie type cannot be used with developing = true (TradingView runtime error RE10128).",
+                        range,
+                    ));
+                }
                 let levels = extra::pivot_point_levels(
                     kind,
                     flag("anchor"),
@@ -177,27 +191,44 @@ impl Session {
         Ok(Some(value))
     }
 
-    /// `ta.obv`, `ta.accdist`, … read as variables. None when `name` is not one of them.
+    /// `ta.obv`, `ta.accdist`, `ta.vwap`, … read as variables. None when `name` is not one of them.
     pub(crate) fn cumulative_variable(
         &mut self,
         name: &str,
         context: &RuntimeContext,
     ) -> Option<RuntimeValue> {
-        let slot = extra::VARIABLES
+        let (slot, variable) = extra::VARIABLES
             .iter()
-            .position(|candidate| *candidate == name)?;
+            .enumerate()
+            .find(|(_, candidate)| candidate.name == name)?;
         let key = usize::MAX - slot;
         // The state leaves the map while it reads the committed history out of `working`.
         let mut state = self.working.ta_states.remove(&key).unwrap_or_default();
-        let value = extra::cumulative(name, &context.bar, &self.working, &mut state);
+        let value = extra::cumulative(variable, &context.bar, &self.working, &mut state);
         self.working.ta_states.insert(key, state);
-        value
+        Some(value)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cumulative_variable_is_listed_once_so_its_state_slot_is_its_own() {
+        // The slot is the position in `VARIABLES` (`cumulative_variable`): a name listed twice
+        // would still read, but two reads of it would no longer share one state.
+        for (position, variable) in extra::VARIABLES.iter().enumerate() {
+            assert_eq!(
+                extra::VARIABLES
+                    .iter()
+                    .position(|other| other.name == variable.name),
+                Some(position),
+                "{} is listed twice",
+                variable.name
+            );
+        }
+    }
 
     #[test]
     fn every_function_ta_extra_lists_has_parameters_and_the_reverse() {

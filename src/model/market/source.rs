@@ -16,6 +16,7 @@ pub enum DataSource {
     CoinGecko,
     DexScreener,
     Alpaca,
+    Oanda,
     Polymarket,
     Kalshi,
     CoinMarketCap,
@@ -24,6 +25,26 @@ pub enum DataSource {
 }
 
 impl DataSource {
+    /// Every source, in the order generic provider lists use.
+    pub const ALL: [DataSource; 16] = [
+        DataSource::Binance,
+        DataSource::Coinbase,
+        DataSource::Okx,
+        DataSource::Kraken,
+        DataSource::Bybit,
+        DataSource::Gate,
+        DataSource::Mexc,
+        DataSource::CoinGecko,
+        DataSource::DexScreener,
+        DataSource::Alpaca,
+        DataSource::Oanda,
+        DataSource::Polymarket,
+        DataSource::Kalshi,
+        DataSource::CoinMarketCap,
+        DataSource::Yahoo,
+        DataSource::Local,
+    ];
+
     pub fn display_name(self) -> &'static str {
         match self {
             Self::Binance => "Binance",
@@ -36,6 +57,7 @@ impl DataSource {
             Self::CoinGecko => "CoinGecko",
             Self::DexScreener => "DEXScreener",
             Self::Alpaca => "Alpaca (IEX)",
+            Self::Oanda => "Oanda",
             Self::Polymarket => "Polymarket",
             Self::Kalshi => "Kalshi",
             Self::CoinMarketCap => "CoinMarketCap",
@@ -57,6 +79,7 @@ impl DataSource {
             Self::CoinGecko => "COINGECKO",
             Self::DexScreener => "DEXSCREENER",
             Self::Alpaca => "ALPACA",
+            Self::Oanda => "OANDA",
             Self::Polymarket => "POLYMARKET",
             Self::Kalshi => "KALSHI",
             Self::CoinMarketCap => "CMC",
@@ -67,24 +90,8 @@ impl DataSource {
 
     /// The source a `watchlist_slug` names, in any case.
     pub fn from_watchlist_slug(slug: &str) -> Option<Self> {
-        const ALL: [DataSource; 15] = [
-            DataSource::Binance,
-            DataSource::Coinbase,
-            DataSource::Okx,
-            DataSource::Kraken,
-            DataSource::Bybit,
-            DataSource::Gate,
-            DataSource::Mexc,
-            DataSource::CoinGecko,
-            DataSource::DexScreener,
-            DataSource::Alpaca,
-            DataSource::Polymarket,
-            DataSource::Kalshi,
-            DataSource::CoinMarketCap,
-            DataSource::Yahoo,
-            DataSource::Local,
-        ];
-        ALL.into_iter()
+        Self::ALL
+            .into_iter()
             .find(|source| source.watchlist_slug().eq_ignore_ascii_case(slug))
     }
 
@@ -131,6 +138,7 @@ impl DataSource {
             | Self::Mexc
             | Self::DexScreener
             | Self::Alpaca
+            | Self::Oanda
             | Self::Yahoo
             | Self::Local => true,
             _ => false,

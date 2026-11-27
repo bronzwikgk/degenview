@@ -7,6 +7,7 @@
 //! a No: the safe answer is the one that needs no aim. A button must be chosen on purpose
 //! (Tab to it, or click): Return alone does nothing.
 
+use crate::i18n::tr;
 use crate::mcp::confirm::PendingView;
 use crate::ui::icons::Icon;
 use crate::ui::kit;
@@ -26,20 +27,8 @@ fn countdown(left: Duration) -> String {
     format!("{}:{:02}", secs / 60, secs % 60)
 }
 
-/// "Delete a price alert" as "delete a price alert", for use inside a sentence.
-fn sentence(action: &str) -> String {
-    let mut chars = action.chars();
-    chars.next().map_or_else(String::new, |first| {
-        first.to_lowercase().chain(chars).collect()
-    })
-}
-
 fn title(view: &PendingView) -> String {
-    format!(
-        "Allow “{}” to {}?",
-        view.client_name,
-        sentence(&view.summary.action)
-    )
+    view.summary.operation.question(&view.client_name)
 }
 
 /// What the dialog says under the title: the target, a consequence, and how long it waits.
@@ -53,12 +42,13 @@ fn message(view: &PendingView, waiting: usize) -> String {
     }
     lines.push(String::new());
     if waiting > 1 {
-        lines.push(format!(
-            "1 of {waiting} waiting. Expires in {}.",
-            countdown(view.expires_in)
+        lines.push(tr!(
+            "1 of {waiting} waiting. Expires in {time}.",
+            waiting = waiting,
+            time = countdown(view.expires_in)
         ));
     } else {
-        lines.push(format!("Expires in {}.", countdown(view.expires_in)));
+        lines.push(tr!("Expires in {time}.", time = countdown(view.expires_in)));
     }
     lines.join("\n")
 }
@@ -76,8 +66,8 @@ pub fn show(ctx: &egui::Context, pending: &[PendingView]) -> Option<Answer> {
             tint: kit::ORANGE,
             title: &title(view),
             message: &message(view, pending.len()),
-            accept: "Allow Once",
-            dismiss: "Deny",
+            accept: tr!("Allow Once"),
+            dismiss: tr!("Deny"),
             // A stray Enter must not let a tool call through.
             cautious: true,
         },
@@ -91,14 +81,15 @@ pub fn show(ctx: &egui::Context, pending: &[PendingView]) -> Option<Answer> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mcp::confirm::Summary;
+    use crate::i18n::{Locale, with_locale};
+    use crate::mcp::confirm::{Operation, Summary};
     use eframe::egui::{Pos2, Rect, vec2};
 
-    fn view(id: u64, action: &str, target: &str) -> PendingView {
+    fn view(id: u64, operation: Operation, target: &str) -> PendingView {
         PendingView {
             id,
             client_name: "Claude Desktop".into(),
-            summary: Summary::new(action, target).with_note("Its trigger history is kept."),
+            summary: Summary::new(operation, target).with_note("Its trigger history is kept."),
             expires_in: Duration::from_secs(102),
         }
     }
@@ -107,7 +98,7 @@ mod tests {
     fn the_title_and_message_say_who_what_and_how_long() {
         let v = view(
             1,
-            "Delete a price alert",
+            Operation::DeleteAlert,
             "BTC/USDT crosses above 70000 USD",
         );
         assert_eq!(title(&v), "Allow “Claude Desktop” to delete a price alert?");
@@ -122,7 +113,30 @@ mod tests {
             "never shows 0:00 early"
         );
         assert_eq!(countdown(Duration::ZERO), "0:00");
-        assert_eq!(sentence(""), "");
+    }
+
+    #[test]
+    fn the_question_and_the_notification_follow_the_language() {
+        let v = view(1, Operation::DeleteAlert, "BTC/USDT");
+        let (heading, body, text) = with_locale(Locale::PSEUDO, || {
+            (title(&v), v.summary.line(), message(&v, 2))
+        });
+        assert!(
+            heading.starts_with('[') && heading.contains("Claude Desktop"),
+            "{heading}"
+        );
+        assert!(body.starts_with('[') && body.contains("BTC/USDT"), "{body}");
+        assert!(
+            text.lines()
+                .last()
+                .is_some_and(|line| line.starts_with('[')),
+            "{text}"
+        );
+        // The client is told the same English line in every language.
+        assert_eq!(
+            with_locale(Locale::PSEUDO, || v.summary.client_line()),
+            "Delete a price alert"
+        );
     }
 
     /// Runs the dialog over frames, pressing `keys` in turn; returns the answer it gave.
@@ -172,7 +186,7 @@ mod tests {
 
     #[test]
     fn an_open_question_stays_open_until_it_is_answered_on_purpose() {
-        let open = [view(7, "Delete a price alert", "BTC/USDT")];
+        let open = [view(7, Operation::DeleteAlert, "BTC/USDT")];
         assert_eq!(answer_after(&open, &[]), None);
         // Return alone must not answer anything: no button has focus yet.
         assert_eq!(answer_after(&open, &[egui::Key::Enter]), None);
@@ -181,8 +195,8 @@ mod tests {
     #[test]
     fn escape_is_a_no_and_a_chosen_button_is_a_yes() {
         let open = [
-            view(7, "Delete a price alert", "BTC/USDT"),
-            view(8, "Remove a chart", "ETH/USDT"),
+            view(7, Operation::DeleteAlert, "BTC/USDT"),
+            view(8, Operation::RemoveChart, "ETH/USDT"),
         ];
         assert_eq!(
             answer_after(&open, &[egui::Key::Escape]),

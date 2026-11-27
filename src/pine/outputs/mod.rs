@@ -50,6 +50,14 @@ pub enum Size {
     Points(u16),
 }
 
+/// `font.family_*`: the face a label's, box's or table cell's text is drawn in.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum FontFamily {
+    #[default]
+    Default,
+    Monospace,
+}
+
 impl Size {
     /// The sizes `size.*` names.
     pub const NAMED: [Size; 6] = [
@@ -126,6 +134,19 @@ impl LineExtend {
 
     pub fn extends_right(self) -> bool {
         matches!(self, Self::Right | Self::Both)
+    }
+
+    /// The sides both extend: how far the fill between two lines runs on.
+    pub fn shared(self, other: Self) -> Self {
+        match (
+            self.extends_left() && other.extends_left(),
+            self.extends_right() && other.extends_right(),
+        ) {
+            (true, true) => Self::Both,
+            (true, false) => Self::Left,
+            (false, true) => Self::Right,
+            (false, false) => Self::None,
+        }
     }
 }
 
@@ -369,6 +390,7 @@ pub struct LabelOutput {
     pub text_color: u32,
     pub style: LabelStyle,
     pub size: Size,
+    pub font_family: FontFamily,
     pub tooltip: Option<String>,
     pub text_align: TextAlign,
     pub yloc: YLocation,
@@ -399,6 +421,7 @@ pub struct BoxOutput {
     pub text: String,
     pub text_color: u32,
     pub text_size: Size,
+    pub text_font_family: FontFamily,
     pub text_horizontal_align: TextAlign,
     pub text_vertical_align: TextAlign,
     pub time_anchored: bool,
@@ -439,6 +462,7 @@ pub struct TableCell {
     pub text_color: u32,
     pub background_color: Option<u32>,
     pub text_size: Size,
+    pub text_font_family: FontFamily,
     pub column_span: usize,
     pub row_span: usize,
     pub text_horizontal_align: TextAlign,
@@ -767,6 +791,16 @@ mod tests {
         assert!(!MarkerLocation::AboveBar.is_below());
         assert!(LineExtend::Both.extends_left() && LineExtend::Both.extends_right());
         assert!(!LineExtend::Right.extends_left());
+        use LineExtend::{Both, Left, None, Right};
+        for (a, b, shared) in [
+            (Both, Both, Both),
+            (Both, Right, Right),
+            (Left, Both, Left),
+            (Left, Right, None),
+            (Right, None, None),
+        ] {
+            assert_eq!((a.shared(b), b.shared(a)), (shared, shared), "{a:?} {b:?}");
+        }
     }
 
     #[test]

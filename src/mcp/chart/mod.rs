@@ -7,14 +7,17 @@ pub mod data;
 pub mod drawings;
 pub mod tools;
 
+use crate::i18n::tr_n;
 use crate::mcp::chart::control::{REMOVE_CHART, SET_CHART_TYPE, SET_TIMEFRAME};
 use crate::mcp::chart::drawings::{DrawingEdit, NewDrawing};
-use crate::mcp::confirm::{Confirm, Gate};
+use crate::mcp::confirm::{Confirm, Gate, Operation};
 use crate::mcp::indicator::ReadingRequest;
 use crate::mcp::indicator::tools::REMOVE_INDICATOR;
 use crate::mcp::session_stats::Query;
-use crate::mcp::tools::{ADD_CHART, ADD_DRAWINGS, ADD_INDICATOR, DELETE_DRAWINGS, UPDATE_DRAWING};
-use crate::model::{BuiltIn, ChartType, InstrumentId, Timeframe};
+use crate::mcp::tools::{
+    ADD_CHART, ADD_DRAWINGS, ADD_INDICATOR, DELETE_DRAWINGS, McpIndicator, UPDATE_DRAWING,
+};
+use crate::model::{ChartType, InstrumentId, Timeframe};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChartCommand {
@@ -29,14 +32,14 @@ pub enum ChartCommand {
     ApplyIndicator {
         workspace_id: u64,
         chart_id: u64,
-        indicator: BuiltIn,
+        indicator: McpIndicator,
         ema_period: Option<usize>,
     },
     /// Takes a built-in indicator off a chart.
     RemoveIndicator {
         workspace_id: u64,
         chart_id: u64,
-        indicator: BuiltIn,
+        indicator: McpIndicator,
     },
     /// Built-in indicator readings over a chart's candles.
     GetIndicatorValues {
@@ -116,35 +119,26 @@ impl Confirm for ChartCommand {
         }
     }
 
-    fn plain_summary(&self) -> Option<(String, String)> {
+    fn plain_summary(&self) -> Option<(Operation, String)> {
         Some(match self {
-            Self::AddChart { instrument, .. } => {
-                ("Add a chart".to_owned(), instrument.symbol.clone())
+            Self::AddChart { instrument, .. } => (Operation::AddChart, instrument.symbol.clone()),
+            Self::ApplyIndicator { indicator, .. } => {
+                (Operation::AddIndicator, format!("{indicator:?}"))
             }
-            Self::ApplyIndicator { indicator, .. } => (
-                "Add an indicator to a chart".to_owned(),
-                format!("{indicator:?}"),
-            ),
-            Self::RemoveIndicator { indicator, .. } => (
-                "Remove an indicator from a chart".to_owned(),
-                format!("{indicator:?}"),
-            ),
+            Self::RemoveIndicator { indicator, .. } => {
+                (Operation::RemoveIndicator, format!("{indicator:?}"))
+            }
             Self::AddDrawings { drawings, .. } => (
-                "Draw on a chart".to_owned(),
-                if drawings.len() == 1 {
-                    "1 drawing".to_owned()
-                } else {
-                    format!("{} drawings", drawings.len())
-                },
+                Operation::DrawOnChart,
+                tr_n!(drawings.len(), "{count} drawing", "{count} drawings"),
             ),
-            Self::EditDrawing { .. } => ("Change a drawing".to_owned(), String::new()),
+            Self::EditDrawing { .. } => (Operation::ChangeDrawing, String::new()),
             Self::SetTimeframe { timeframe, .. } => {
-                ("Change the timeframe".to_owned(), timeframe.to_string())
+                (Operation::ChangeTimeframe, timeframe.to_string())
             }
-            Self::SetChartType { chart_type, .. } => (
-                "Change the chart type".to_owned(),
-                format!("{chart_type:?}"),
-            ),
+            Self::SetChartType { chart_type, .. } => {
+                (Operation::ChangeChartType, format!("{chart_type:?}"))
+            }
             _ => return None,
         })
     }

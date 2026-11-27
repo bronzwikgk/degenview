@@ -4,7 +4,9 @@
 
 use super::frame::FrameLayout;
 use super::*;
+use crate::i18n::tr;
 use crate::model::chart::sync::TimeAxis;
+use crate::pine::time::bucket::seconds_of;
 use crate::ui::paper::chart_trading::{MarkerMenu, PaperOverlayAction};
 
 /// What one call to [`ChartCard::body`] draws and reports on.
@@ -46,14 +48,23 @@ pub(super) fn symbol_info(symbol: &str, source: DataSource, chart_type: ChartTyp
         .to_owned(),
         base_currency: None,
         chart: chart_type.kind(),
+        grid: source.grid(),
     }
 }
 
-/// Bars that follow price carry no length of their own: scripts read the candles'. `None` for a
-/// chart drawn from the candles themselves, which scripts already see with their own length.
-pub(super) fn source_bar_seconds(candles: &[Kline], constructed: bool) -> Option<f64> {
+/// Bars that follow price carry no length of their own: scripts read the candles', which are the
+/// chart's timeframe, else (a chart with none set) those of the newest candle. `None` for a chart
+/// drawn from the candles themselves, which scripts already see with their own length.
+pub(super) fn source_bar_seconds(
+    candles: &[Kline],
+    timeframe: Option<Timeframe>,
+    constructed: bool,
+) -> Option<f64> {
     if !constructed {
         return None;
+    }
+    if let Some(timeframe) = timeframe {
+        return Some(seconds_of(timeframe));
     }
     let last = candles.last()?;
     let seconds = (last.close_time - last.open_time + 1) as f64 / 1000.0;
@@ -382,10 +393,10 @@ impl ChartCard {
         let response = crate::ui::accessibility::label_as(
             response,
             egui::WidgetType::Panel,
-            format!(
-                "{} {} chart",
-                self.display_title(symbol, source),
-                source.display_name()
+            tr!(
+                "{title} {source} chart",
+                title = self.display_title(symbol, source),
+                source = source.display_name()
             ),
         );
         let rect = response.rect;
@@ -400,9 +411,9 @@ impl ChartCard {
             return pointer;
         }
 
-        // A script that isn't an overlay (RSI, MACD …) gets a pane under the candles: 30% of the
-        // chart's height shared between them, the candles keep the rest and the time axis. On a
-        // line chart every script draws over the line instead.
+        // A script that isn't an overlay (RSI, MACD …) gets a pane under the candles, of the height
+        // the user dragged it to or its part of 30% of the chart; the candles keep the rest and the
+        // time axis. On a line chart every script draws over the line instead.
         // A price-based chart type draws bars it constructed from the candles, and the scripts
         // and indicators on it read those same bars; every other type draws the candles as they
         // are. Either way `bars` is what the chart is, and `candles` stays the market.
@@ -426,7 +437,8 @@ impl ChartCard {
         self.keep_view_on_its_bars(bars);
         self.begin_sync_frame();
         let symbol_info = body::symbol_info(symbol, source, chart_type);
-        let source_bar_seconds = body::source_bar_seconds(candles, constructed.is_some());
+        let source_bar_seconds =
+            body::source_bar_seconds(candles, self.timeframe, constructed.is_some());
         let placed = self.pine_outputs(ui.ctx(), &symbol_info, bars, source_bar_seconds);
         let outputs = frame::split_forced_overlays(placed, line);
         self.feed_table(
@@ -449,6 +461,7 @@ impl ChartCard {
             constructed: constructed.as_deref(),
             outputs: &outputs,
             indicators,
+            countdown: self.countdown,
         };
         let layout = self.frame_layout(
             &data,
@@ -459,6 +472,7 @@ impl ChartCard {
             &style,
         );
         self.keep_panes_in_step(&layout);
+        self.handle_pane_dividers(ui, chart_id, &layout, replay.selecting);
         let plot = layout.plot;
         self.axis_width = full_rect.max.x - plot.max.x;
         let pane_rects = &layout.pane_rects;
@@ -674,25 +688,58 @@ mod tests {
 
     #[test]
     fn a_chart_of_the_candles_themselves_has_no_source_bar_length() {
-        assert_eq!(source_bar_seconds(&[candle(0, 3_599_999)], false), None);
+        assert_eq!(
+            source_bar_seconds(&[candle(0, 3_599_999)], None, false),
+            None
+        );
     }
 
     #[test]
-    fn constructed_bars_read_the_length_of_the_last_candle() {
+    fn constructed_bars_without_a_timeframe_read_the_length_of_the_last_candle() {
         // An hour: open to close inclusive of the last millisecond.
         assert_eq!(
-            source_bar_seconds(&[candle(0, 3_599_999)], true),
+            source_bar_seconds(&[candle(0, 3_599_999)], None, true),
             Some(3600.0)
         );
         // The last candle decides, and the length is rounded to whole seconds.
         let candles = [candle(0, 59_999), candle(60_000, 60_000 + 899_999)];
-        assert_eq!(source_bar_seconds(&candles, true), Some(900.0));
-        assert_eq!(source_bar_seconds(&[candle(0, 1_499)], true), Some(2.0));
+        assert_eq!(source_bar_seconds(&candles, None, true), Some(900.0));
+        assert_eq!(
+            source_bar_seconds(&[candle(0, 1_499)], None, true),
+            Some(2.0)
+        );
+    }
+
+    #[test]
+    fn constructed_bars_read_the_charts_timeframe_not_a_candle_cut_short_by_midnight() {
+        // A 59 s chart's last candle of the day is 24 s long.
+        let candles = [candle(0, 58_999), candle(86_376_000, 86_376_000 + 23_999)];
+        let timeframe = Timeframe::new(59, crate::model::TimeUnit::Second).unwrap();
+        assert_eq!(
+            source_bar_seconds(&candles, Some(timeframe), true),
+            Some(59.0)
+        );
+        assert_eq!(source_bar_seconds(&candles, Some(timeframe), false), None);
     }
 
     #[test]
     fn no_candles_or_an_empty_span_give_no_source_bar_length() {
-        assert_eq!(source_bar_seconds(&[], true), None);
-        assert_eq!(source_bar_seconds(&[candle(1_000, 500)], true), None);
+        assert_eq!(source_bar_seconds(&[], None, true), None);
+        assert_eq!(source_bar_seconds(&[candle(1_000, 500)], None, true), None);
+    }
+
+    #[test]
+    fn a_stock_chart_hands_scripts_the_session_grid_and_every_other_market_the_utc_one() {
+        use crate::model::market::bucket::Grid;
+        let grid = |source| symbol_info("X", source, ChartType::Candles).grid;
+        assert_eq!(grid(DataSource::Alpaca), Grid::UsEquities);
+        for source in [
+            DataSource::Binance,
+            DataSource::Coinbase,
+            DataSource::Okx,
+            DataSource::DexScreener,
+        ] {
+            assert_eq!(grid(source), Grid::Utc, "{source:?}");
+        }
     }
 }

@@ -14,7 +14,8 @@ use crate::mcp::market::{
 };
 use crate::mcp::state::ClientIdentity;
 use crate::mcp::tools::{
-    Caller, DegenViewMcp, McpSource, alpaca_configured, failure, invalid, parse_id, unexpected,
+    Caller, DegenViewMcp, McpSource, alpaca_configured, failure, invalid, oanda_configured,
+    parse_id, unexpected,
 };
 use crate::model::mcp::Permission;
 use crate::model::watchlist::WatchlistInstrument;
@@ -53,7 +54,7 @@ const QUOTE_POLL: Duration = Duration::from_millis(100);
 const DEFAULT_ENTRY_PAGE: usize = 100;
 
 /// Providers searched when the caller names none: every one a market can be charted from.
-const ALL_SOURCES: [McpSource; 10] = [
+const ALL_SOURCES: [McpSource; 11] = [
     McpSource::Binance,
     McpSource::Coinbase,
     McpSource::Okx,
@@ -64,6 +65,7 @@ const ALL_SOURCES: [McpSource; 10] = [
     McpSource::Coingecko,
     McpSource::Dexscreener,
     McpSource::Alpaca,
+    McpSource::Oanda,
 ];
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -111,7 +113,7 @@ pub struct MarketCandlesParams {
     /// The provider's own symbol, as `degenview_search_symbols` returns it.
     #[schemars(length(min = 1, max = 128))]
     pub symbol: String,
-    /// The bar length: a count and a unit (m minutes, h hours, D days, W weeks, M months, or 1Y),
+    /// The bar length: a count and a unit (s seconds, m minutes, h hours, D days, W weeks, M months, or 1Y),
     /// for example 15m, 4h, 1D, 2W, 3M.
     #[schemars(length(min = 1, max = 16))]
     pub timeframe: String,
@@ -440,6 +442,7 @@ fn search_all(
     sources: &[McpSource],
     query: &str,
     alpaca_ready: bool,
+    oanda_ready: bool,
 ) -> Vec<(McpSource, Result<Vec<crate::service::SearchResult>, String>)> {
     std::thread::scope(|scope| {
         let handles: Vec<_> = sources
@@ -452,6 +455,13 @@ fn search_all(
                         return (
                             source,
                             Err("Alpaca needs API credentials: add them in DegenView Settings > API Keys"
+                                .to_owned()),
+                        );
+                    }
+                    if data == DataSource::Oanda && !oanda_ready {
+                        return (
+                            source,
+                            Err("Oanda needs API credentials: add them in DegenView Settings > Oanda"
                                 .to_owned()),
                         );
                     }
@@ -476,7 +486,7 @@ fn search_all(
 impl DegenViewMcp {
     #[tool(
         name = "degenview_search_symbols",
-        description = "Search the market data providers for symbols by ticker or name. Returns, per hit, the `source` and `symbol` to pass to degenview_add_chart, degenview_get_quotes, degenview_create_price_alert and the watchlist tools, plus how the app labels it. Searches Binance, Coinbase, OKX, Kraken, Bybit, Gate.io, MEXC, CoinGecko, DEXScreener and (with API keys) Alpaca stocks side by side; a provider that fails is reported in `source_errors` while the others still answer. Hits only prove the provider lists the market; ask degenview_get_quotes for a price.",
+        description = "Search the market data providers for symbols by ticker or name. Returns, per hit, the `source` and `symbol` to pass to degenview_add_chart, degenview_get_quotes, degenview_create_price_alert and the watchlist tools, plus how the app labels it. Searches Binance, Coinbase, OKX, Kraken, Bybit, Gate.io, MEXC, CoinGecko, DEXScreener and (with API keys) Alpaca stocks and Oanda forex side by side; a provider that fails is reported in `source_errors` while the others still answer. Hits only prove the provider lists the market; ask degenview_get_quotes for a price.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -516,12 +526,13 @@ impl DegenViewMcp {
             )));
         };
         let alpaca_ready = !sources.contains(&McpSource::Alpaca) || alpaca_configured().await;
+        let oanda_ready = !sources.contains(&McpSource::Oanda) || oanda_configured().await;
         let search = self.shared.market_search();
         let worker = {
             let (query, sources) = (query.clone(), sources.clone());
             tokio::task::spawn_blocking(move || {
                 let _permit = permit;
-                search_all(&search, &sources, &query, alpaca_ready)
+                search_all(&search, &sources, &query, alpaca_ready, oanda_ready)
             })
         };
         let outcomes = match tokio::time::timeout(SEARCH_DEADLINE, worker).await {
@@ -597,7 +608,7 @@ impl DegenViewMcp {
 
     #[tool(
         name = "degenview_get_market_candles",
-        description = "Read the price candles of any market straight from its provider, with no chart needed: the newest `limit` bars (default 200, max 1000) at any timeframe (a count and unit: m minutes, h hours, D days, W weeks, M months, or 1Y; e.g. 15m, 4h, 1D, 2W, 3M), oldest first, as rows under named `columns` (time, open, high, low, close, volume). The same bars a chart of that market would load, through the same provider calls and caches, so it can lag a live chart by a refresh. Slow providers (CoinGecko, DEXScreener) are rate limited and may take several seconds. Older history than the newest `limit` bars is not available here; open a chart and scroll back, or use degenview_get_candles on one. Volume is null where a provider reports none. For many markets at once use degenview_get_quotes.",
+        description = "Read the price candles of any market straight from its provider, with no chart needed: the newest `limit` bars (default 200, max 1000) at any timeframe (a count and unit: s seconds, m minutes, h hours, D days, W weeks, M months, or 1Y; e.g. 30s, 15m, 4h, 1D, 2W, 3M), oldest first, as rows under named `columns` (time, open, high, low, close, volume). The same bars a chart of that market would load, through the same provider calls and caches, so it can lag a live chart by a refresh. Slow providers (CoinGecko, DEXScreener) are rate limited and may take several seconds. Older history than the newest `limit` bars is not available here; open a chart and scroll back, or use degenview_get_candles on one. Volume is null where a provider reports none. For many markets at once use degenview_get_quotes.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -625,6 +636,11 @@ impl DegenViewMcp {
         if source == DataSource::Alpaca && !alpaca_configured().await {
             return Err(failure(&McpError::Unsupported(
                 "Alpaca needs API credentials: add them in DegenView Settings > API Keys".into(),
+            )));
+        }
+        if source == DataSource::Oanda && !oanda_configured().await {
+            return Err(failure(&McpError::Unsupported(
+                "Oanda needs API credentials: add them in DegenView Settings > Oanda".into(),
             )));
         }
         let Some(permit) = self.shared.try_candle_job() else {

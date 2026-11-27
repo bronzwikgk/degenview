@@ -16,6 +16,7 @@ use crate::host::settings::{SettingsHost, SettingsHostAction};
 use crate::host::snapshot::SnapshotHost;
 use crate::host::tab::window::TabWindowHost;
 use crate::host::update::{Phase, UpdateHost, UpdateView};
+use crate::i18n::tr;
 use crate::lock::lock;
 use crate::model::alert::{AlertRuntimeCommand, AlertRuntimeCommandPayload};
 use crate::model::tab::windows::WindowId;
@@ -88,7 +89,7 @@ fn show_window(
     chart_info: Option<crate::pine_studio::ChartInfo>,
 ) {
     let ctx = ui.ctx().clone();
-    crate::crash_report::confirm_first_frame(&ctx);
+    crate::graphics::observe_frame(&ctx);
     if ui.input(|input| input.viewport().close_requested()) {
         // The app closes the window's tabs (a script with edits asks first) and drops the
         // window itself; until then it stays up.
@@ -261,8 +262,10 @@ fn show_session_save_error(ctx: &egui::Context, error: &SessionSaveError) {
     let spec = kit::Notice {
         icon: Icon::Triangle,
         tint: kit::ORANGE,
-        title: "Couldn\u{2019}t Save Open Tabs",
-        message: "DegenView couldn\u{2019}t save which tabs are open, so they may not reopen after a restart. It keeps trying in the background.",
+        title: tr!("Couldn\u{2019}t Save Open Tabs"),
+        message: tr!(
+            "DegenView couldn\u{2019}t save which tabs are open, so they may not reopen after a restart. It keeps trying in the background."
+        ),
     };
     let dismissed = kit::notice_with(ctx, egui::Id::new("session-save-error"), &spec, |ui| {
         ui.add_space(10.0);
@@ -291,17 +294,20 @@ fn show_restart_prompt(ctx: &egui::Context, env: &WindowEnv, update: &UpdateView
     if !env.updates.restart_prompt_pending() {
         return;
     }
-    let message = format!("DegenView {version} is ready. DegenView will close and reopen.");
+    let message = tr!(
+        "DegenView {version} is ready. DegenView will close and reopen.",
+        version = version
+    );
     let outcome = kit::alert(
         ctx,
         egui::Id::new("update-restart-prompt"),
         &kit::Alert {
             icon: Icon::Cycle,
             tint: kit::ORANGE,
-            title: "Restart to finish updating?",
+            title: tr!("Restart to finish updating?"),
             message: &message,
-            accept: "Restart Now",
-            dismiss: "Later",
+            accept: tr!("Restart Now"),
+            dismiss: tr!("Later"),
             cautious: false,
         },
     );
@@ -419,7 +425,7 @@ impl DegenViewApp {
         let trading_hub = Arc::clone(&self.trading_hub);
         let builder = crate::ui::window::chrome::branded(
             egui::ViewportBuilder::default()
-                .with_title("Settings")
+                .with_title(tr!("Settings"))
                 .with_inner_size(window::WINDOW_SIZE)
                 .with_min_inner_size(window::MIN_SIZE),
         );
@@ -529,6 +535,12 @@ impl DegenViewApp {
                             // about before the app goes.
                             if let Ok(mut pending) = app_actions.lock() {
                                 pending.push(AppAction::Quit);
+                            }
+                            ui.ctx().request_repaint();
+                        }
+                        SettingsHostAction::Restart => {
+                            if let Ok(mut pending) = app_actions.lock() {
+                                pending.push(AppAction::Restart);
                             }
                             ui.ctx().request_repaint();
                         }

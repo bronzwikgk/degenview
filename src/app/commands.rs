@@ -17,6 +17,7 @@ use eframe::egui;
 
 impl DegenViewApp {
     pub(super) fn process_commands(&mut self, ctx: &egui::Context) {
+        native_bridge::follow_language();
         native_bridge::set_edit_menu(
             self.with_focused_pine_studio(|pine| pine.edit_menu())
                 .unwrap_or_default(),
@@ -108,6 +109,10 @@ impl DegenViewApp {
         for action in actions {
             match action {
                 AppAction::Quit => self.request_quit(ctx),
+                AppAction::Restart => {
+                    self.reopen_on_exit = true;
+                    self.request_quit(ctx);
+                }
                 AppAction::QuitDecided { proceed } => {
                     if proceed {
                         // The next script window with edits asks in turn; none left, and it quits.
@@ -121,6 +126,9 @@ impl DegenViewApp {
                 AppAction::OpenPineSource(target) => self.open_pine_source(ctx, &target),
                 AppAction::OpenAlpacaSettings => {
                     self.open_settings_page(ctx, SettingsHost::open_alpaca);
+                }
+                AppAction::OpenOandaSettings => {
+                    self.open_settings_page(ctx, SettingsHost::open_oanda);
                 }
                 AppAction::OpenBrokerSettings => {
                     self.open_settings_page(ctx, SettingsHost::open_brokers);
@@ -267,9 +275,10 @@ impl DegenViewApp {
 
     /// Cancel or a failed save: the quit stays off and no window keeps asking.
     fn call_off_quit(&mut self) {
-        // A restart for an update was waiting on this quit; the app keeps running, so it must not
-        // start the new version when it exits some other time.
+        // A restart was waiting on this quit; the app keeps running, so it must not start again
+        // when it exits some other time.
         self.updates.disarm_relaunch();
+        self.reopen_on_exit = false;
         for tab in self.tabs.slots() {
             if let Ok(mut content) = tab.content.lock()
                 && let TabContent::Pine(pine) = &mut *content

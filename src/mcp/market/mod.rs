@@ -5,8 +5,9 @@
 
 pub mod tools;
 
+use crate::i18n::tr;
 use crate::mcp::chart::data::iso;
-use crate::mcp::confirm::{Confirm, Gate};
+use crate::mcp::confirm::{Confirm, Gate, Operation};
 use crate::mcp::market::tools::{CREATE_WATCHLIST, DELETE_WATCHLIST, UPDATE_WATCHLIST};
 use crate::model::watchlist::quote::{ChangeBasis, Freshness, VolumeKind, WatchlistQuote};
 use crate::model::watchlist::{Watchlist, WatchlistEntry, WatchlistInstrument};
@@ -57,12 +58,12 @@ impl Confirm for WatchlistCommand {
         }
     }
 
-    fn plain_summary(&self) -> Option<(String, String)> {
+    fn plain_summary(&self) -> Option<(Operation, String)> {
         Some(match self {
-            Self::Create { name, .. } => ("Create a watchlist".to_owned(), name.clone()),
+            Self::Create { name, .. } => (Operation::CreateWatchlist, name.clone()),
             Self::Update { watchlist_id, .. } => (
-                "Change a watchlist".to_owned(),
-                format!("watchlist {watchlist_id}"),
+                Operation::ChangeWatchlist,
+                tr!("watchlist {id}", id = watchlist_id),
             ),
             _ => return None,
         })
@@ -89,6 +90,7 @@ pub fn source_id(source: DataSource) -> &'static str {
         DataSource::CoinGecko => "coingecko",
         DataSource::DexScreener => "dexscreener",
         DataSource::Alpaca => "alpaca",
+        DataSource::Oanda => "oanda",
         DataSource::Polymarket => "polymarket",
         DataSource::Kalshi => "kalshi",
         DataSource::CoinMarketCap => "coinmarketcap",

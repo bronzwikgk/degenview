@@ -211,9 +211,9 @@ fn replay_disables_alerts_and_orders_with_a_reason() {
     facts.replay = true;
     let menu = menu(&context(Some(118_150.0)), &facts);
     let add_alert = find(&menu, &Command::AddAlert).unwrap();
-    assert_eq!(add_alert.disabled, Some(IN_REPLAY));
+    assert_eq!(add_alert.disabled, Some(in_replay()));
     let add_order = find(&menu, &Command::AddOrder).unwrap();
-    assert_eq!(add_order.disabled, Some(IN_REPLAY));
+    assert_eq!(add_order.disabled, Some(in_replay()));
     // Copying a price and the chart panels still work in replay.
     assert!(find(&menu, &Command::CopyPrice).unwrap().is_enabled());
 }
@@ -226,7 +226,11 @@ fn a_price_at_the_market_greys_the_pending_orders_with_a_reason() {
         .filter(|item| matches!(item.command, Some(Command::QuickOrder(_))))
         .collect();
     assert_eq!(pending.len(), 2);
-    assert!(pending.iter().all(|item| item.disabled == Some(NO_MARKET)));
+    assert!(
+        pending
+            .iter()
+            .all(|item| item.disabled == Some(no_market()))
+    );
     // The full ticket is still reachable at the market price.
     assert!(find(&menu, &Command::AddOrder).unwrap().is_enabled());
 }
@@ -383,7 +387,8 @@ fn axes_get_their_own_menus_not_the_background_one() {
             "Regular",
             "Percent",
             "Indexed to 100",
-            "Logarithmic"
+            "Logarithmic",
+            "Countdown to bar close"
         ]
     );
     // One mode is marked, the active one, and each row sets exactly its own.
@@ -400,6 +405,31 @@ fn axes_get_their_own_menus_not_the_background_one() {
     let mut time = context(None);
     time.target = Target::TimeAxis;
     assert_eq!(labels(&super::menu(&time, &facts)), ["Reset chart view"]);
+}
+
+#[test]
+fn the_price_axis_menu_marks_the_countdown_and_greys_it_out_where_there_is_none() {
+    let mut price = context(None);
+    price.target = Target::PriceAxis;
+    let countdown = |facts: &Facts| {
+        find(&super::menu(&price, facts), &Command::ToggleBarCountdown)
+            .expect("the entry is always offered")
+            .clone()
+    };
+    let mut facts = facts();
+    let entry = countdown(&facts);
+    assert!(entry.checked, "on by default");
+    assert_eq!(entry.disabled, None);
+
+    facts.bar_countdown = false;
+    assert!(!countdown(&facts).checked);
+
+    facts.bar_countdown_eligible = false;
+    let entry = countdown(&facts);
+    assert!(
+        entry.disabled.is_some(),
+        "a Renko chart has no bars on a clock"
+    );
 }
 
 #[test]
@@ -661,7 +691,7 @@ fn live_orders_are_greyed_with_the_reason_whenever_one_could_not_be_placed() {
     assert!(
         disabled(replay, Some(1.0))
             .iter()
-            .all(|d| *d == Some(IN_REPLAY))
+            .all(|d| *d == Some(in_replay()))
     );
 
     // A constructed chart: a price entry has no market price to use, a market order still works.

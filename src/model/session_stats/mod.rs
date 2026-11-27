@@ -16,10 +16,11 @@
 //!   belonging to it when it overlaps 09:30–16:00 on a weekday; every other market is taken to
 //!   trade round the clock and a day is the UTC date (the same two kinds of symbol the Pine
 //!   `session.*` variables know). Daily bars are one day each, by their UTC date.
-//! - This build has no bars under an hour. On hourly bars the day opens with the first bar's open,
-//!   so for a US stock the first bar may begin before 09:30 and its open may be an extended-hours
-//!   price; that is flagged in [`Note::BoundaryOpen`] rather than corrected. Daily bars of a stock
-//!   are the provider's own.
+//! - This build has no bars under an hour. On hourly bars the day opens with the first bar's open.
+//!   A US stock's hourly bars are cut on its session (09:30, `bucket::Grid::UsEquities`), so that
+//!   is the session's open; bars that begin before 09:30 would make it an extended-hours price,
+//!   which is flagged in [`Note::BoundaryOpen`] rather than corrected. Daily bars of a stock are
+//!   the provider's own.
 //! - A gap is the day's open against the previous day's close, so a market that trades round the
 //!   clock has almost none and its gap statistics are mostly empty. A gap is "filled" when a later
 //!   bar's range touches the previous close; the day it opens on counts, the bar it opens in counts.
@@ -33,7 +34,9 @@
 //! chart hands over the bars it draws.
 
 use crate::format::days_from_civil;
+use crate::i18n::tr;
 use crate::model::market::kline::Kline;
+use crate::model::market::session;
 use crate::pine::time::calendar;
 use crate::pine::time::trading_session::MarketSessions;
 
@@ -75,18 +78,19 @@ impl Outcome {
         Self::FirstBarLowBreak,
     ];
 
-    pub const fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
-            Self::GapFill => "Gap fill",
-            Self::DayUp => "Day closes up",
-            Self::PriorHighBreak => "Breaks prior day high",
-            Self::PriorLowBreak => "Breaks prior day low",
-            Self::FirstBarHighBreak => "Breaks first bar high",
-            Self::FirstBarLowBreak => "Breaks first bar low",
+            Self::GapFill => tr!("Gap fill"),
+            Self::DayUp => tr!("Day closes up"),
+            Self::PriorHighBreak => tr!("Breaks prior day high"),
+            Self::PriorLowBreak => tr!("Breaks prior day low"),
+            Self::FirstBarHighBreak => tr!("Breaks first bar high"),
+            Self::FirstBarLowBreak => tr!("Breaks first bar low"),
         }
     }
 
-    /// The sentence the result reads as: "<this> on days that …".
+    /// The sentence the result reads as: "<this> on days that …". English in every language: MCP
+    /// clients are told it. A screen shows [`Self::display_question`].
     pub const fn question(self) -> &'static str {
         match self {
             Self::GapFill => "How often the gap was filled",
@@ -98,20 +102,34 @@ impl Outcome {
         }
     }
 
+    /// [`Self::question`] in the language in use, for a screen.
+    pub fn display_question(self) -> &'static str {
+        match self {
+            Self::GapFill => tr!("How often the gap was filled"),
+            Self::DayUp => tr!("How often the day closed above its open"),
+            Self::PriorHighBreak => tr!("How often the day's high broke the prior day's high"),
+            Self::PriorLowBreak => tr!("How often the day's low broke the prior day's low"),
+            Self::FirstBarHighBreak => {
+                tr!("How often a later bar broke the first bar's high")
+            }
+            Self::FirstBarLowBreak => tr!("How often a later bar broke the first bar's low"),
+        }
+    }
+
     /// When a day counts as a hit, in a sentence for the panel to show under the question.
-    pub const fn hit_when(self) -> &'static str {
+    pub fn hit_when(self) -> &'static str {
         match self {
             Self::GapFill => {
-                "A later bar's range touches the previous close. Only days that gapped count."
+                tr!("A later bar's range touches the previous close. Only days that gapped count.")
             }
-            Self::DayUp => "The day closes above its open. A flat day is not up.",
-            Self::PriorHighBreak => "The day's high goes above the previous day's high.",
-            Self::PriorLowBreak => "The day's low goes below the previous day's low.",
+            Self::DayUp => tr!("The day closes above its open. A flat day is not up."),
+            Self::PriorHighBreak => tr!("The day's high goes above the previous day's high."),
+            Self::PriorLowBreak => tr!("The day's low goes below the previous day's low."),
             Self::FirstBarHighBreak => {
-                "A later bar trades above the day's first bar high. Needs the 1H timeframe."
+                tr!("A later bar trades above the day's first bar high. Needs the 1H timeframe.")
             }
             Self::FirstBarLowBreak => {
-                "A later bar trades below the day's first bar low. Needs the 1H timeframe."
+                tr!("A later bar trades below the day's first bar low. Needs the 1H timeframe.")
             }
         }
     }
@@ -175,10 +193,19 @@ impl WeekdaySet {
     }
 
     pub fn names(self) -> Vec<&'static str> {
-        (0..7)
-            .filter(|&day| self.contains(day))
-            .map(|day| Self::NAMES[day])
+        self.members().map(|day| Self::NAMES[day]).collect()
+    }
+
+    /// [`Self::names`] in the language in use, for a screen: the same short names the weekday strip
+    /// shows, from the calendar data of the language.
+    pub fn display_names(self) -> Vec<String> {
+        self.members()
+            .map(crate::i18n::datetime::weekday_short)
             .collect()
+    }
+
+    fn members(self) -> impl Iterator<Item = usize> {
+        (0..7).filter(move |&day| self.contains(day))
     }
 
     /// A set from the three-letter names; `None` for a name that is not one.
@@ -255,17 +282,48 @@ impl Filter {
         self.gap != Side::Any || self.gap_min_pct.is_some() || self.gap_max_pct.is_some()
     }
 
-    /// The conditions as words ("Tue, Wed · gap up 0.1%–0.6% · prior day down").
+    /// The conditions as words ("Tue, Wed · gap up 0.1%–0.6% · prior day down"). English in
+    /// every language: MCP clients are told it. A screen shows [`Self::display_describe`].
     pub fn describe(&self) -> String {
+        self.describe_in(&Words {
+            every_day: "every day",
+            gap: "gap",
+            gap_up: "gap up",
+            gap_down: "gap down",
+            prior_up: "prior day up",
+            prior_down: "prior day down",
+            weekdays: self
+                .weekdays
+                .names()
+                .into_iter()
+                .map(String::from)
+                .collect(),
+        })
+    }
+
+    /// [`Self::describe`] in the language in use, for a screen.
+    pub fn display_describe(&self) -> String {
+        self.describe_in(&Words {
+            every_day: tr!("every day"),
+            gap: tr!("gap"),
+            gap_up: tr!("gap up"),
+            gap_down: tr!("gap down"),
+            prior_up: tr!("prior day up"),
+            prior_down: tr!("prior day down"),
+            weekdays: self.weekdays.display_names(),
+        })
+    }
+
+    fn describe_in(&self, words: &Words) -> String {
         let mut parts = Vec::new();
         if !self.weekdays.is_all() {
-            parts.push(self.weekdays.names().join(", "));
+            parts.push(crate::i18n::join_list(&words.weekdays));
         }
         if self.gap != Side::Any || self.gap_min_pct.is_some() || self.gap_max_pct.is_some() {
             let side = match self.gap {
-                Side::Any => "gap",
-                Side::Up => "gap up",
-                Side::Down => "gap down",
+                Side::Any => words.gap,
+                Side::Up => words.gap_up,
+                Side::Down => words.gap_down,
             };
             parts.push(match (self.gap_min_pct, self.gap_max_pct) {
                 (Some(low), Some(high)) => format!("{side} {low}%–{high}%"),
@@ -276,15 +334,26 @@ impl Filter {
         }
         match self.prior_day {
             Side::Any => {}
-            Side::Up => parts.push("prior day up".to_owned()),
-            Side::Down => parts.push("prior day down".to_owned()),
+            Side::Up => parts.push(words.prior_up.to_owned()),
+            Side::Down => parts.push(words.prior_down.to_owned()),
         }
         if parts.is_empty() {
-            "every day".to_owned()
+            words.every_day.to_owned()
         } else {
             parts.join(" · ")
         }
     }
+}
+
+/// The words a [`Filter`] is described in: English for tools, the language in use for a screen.
+struct Words {
+    every_day: &'static str,
+    gap: &'static str,
+    gap_up: &'static str,
+    gap_down: &'static str,
+    prior_up: &'static str,
+    prior_down: &'static str,
+    weekdays: Vec<String>,
 }
 
 /// When the market trades, which decides what a day is.
@@ -304,10 +373,20 @@ impl MarketHours {
         }
     }
 
+    /// English in every language: MCP clients are told it. A screen shows
+    /// [`Self::display_label`].
     pub const fn label(self) -> &'static str {
         match self {
             Self::Continuous => "UTC days",
             Self::UsStock => "US regular hours",
+        }
+    }
+
+    /// [`Self::label`] in the language in use, for a screen.
+    pub fn display_label(self) -> &'static str {
+        match self {
+            Self::Continuous => tr!("UTC days"),
+            Self::UsStock => tr!("US regular hours"),
         }
     }
 }
@@ -370,8 +449,8 @@ pub struct Timing {
 /// A caveat the result carries.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Note {
-    /// A stock's first hourly bar may start before the open, so the day's open may be a pre-market
-    /// price.
+    /// A session's first bar starts before the open (bars on the clock hour, not cut on the
+    /// session), so the day's open may be a pre-market price.
     BoundaryOpen,
     /// Nothing qualified; for a gap outcome on a market that trades round the clock, that is why.
     NoGaps,
@@ -379,13 +458,15 @@ pub enum Note {
 
 impl Note {
     /// A few words for the callout's heading.
-    pub const fn title(self) -> &'static str {
+    pub fn title(self) -> &'static str {
         match self {
-            Self::BoundaryOpen => "Hourly bars blur the open",
-            Self::NoGaps => "No gaps on this market",
+            Self::BoundaryOpen => tr!("Hourly bars blur the open"),
+            Self::NoGaps => tr!("No gaps on this market"),
         }
     }
 
+    /// English in every language: MCP clients are told it. A screen shows
+    /// [`Self::display_text`].
     pub const fn text(self) -> &'static str {
         match self {
             Self::BoundaryOpen => {
@@ -393,6 +474,22 @@ impl Note {
             }
             Self::NoGaps => {
                 "This market trades round the clock, so a day opens where the last one closed and there are almost no gaps."
+            }
+        }
+    }
+
+    /// [`Self::text`] in the language in use, for a screen.
+    pub fn display_text(self) -> &'static str {
+        match self {
+            Self::BoundaryOpen => {
+                tr!(
+                    "Hourly bars: a day's open is its first bar's open, which may be a pre-market price."
+                )
+            }
+            Self::NoGaps => {
+                tr!(
+                    "This market trades round the clock, so a day opens where the last one closed and there are almost no gaps."
+                )
             }
         }
     }
@@ -409,11 +506,24 @@ pub enum Unavailable {
 }
 
 impl Unavailable {
+    /// English in every language: MCP clients are told it. A screen shows
+    /// [`Self::display_text`].
     pub const fn text(self) -> &'static str {
         match self {
             Self::NoBars => "There are no bars to count yet.",
             Self::TooCoarse => "Session statistics need hourly or daily bars.",
             Self::NeedsIntraday => "This question needs hourly bars; switch the timeframe to 1H.",
+        }
+    }
+
+    /// [`Self::text`] in the language in use, for a screen.
+    pub fn display_text(self) -> &'static str {
+        match self {
+            Self::NoBars => tr!("There are no bars to count yet."),
+            Self::TooCoarse => tr!("Session statistics need hourly or daily bars."),
+            Self::NeedsIntraday => {
+                tr!("This question needs hourly bars; switch the timeframe to 1H.")
+            }
         }
     }
 }
@@ -519,6 +629,16 @@ fn sessions(bars: &[Kline], bar_ms: i64, hours: MarketHours, intraday: bool) -> 
         }
     }
     days
+}
+
+/// Whether the first bar of some session opens before the regular open (09:30 New York), so that
+/// session's open is a pre-market price. Bars cut on the session (`bucket::Grid::UsEquities`)
+/// never do; hourly bars on the clock hour do.
+fn opens_before_the_session(bars: &[Kline], days: &[Day]) -> bool {
+    days.iter().any(|day| {
+        let first = bars[day.start].open_time;
+        first < session::open_ms(session::local_day(first))
+    })
 }
 
 /// What one day says about a question: `None` when it does not qualify, else whether the outcome
@@ -694,7 +814,7 @@ pub fn compute(
         .flatten();
 
     let mut notes = Vec::new();
-    if intraday && hours == MarketHours::UsStock {
+    if intraday && hours == MarketHours::UsStock && opens_before_the_session(bars, &days) {
         notes.push(Note::BoundaryOpen);
     }
     if estimate.n == 0 && outcome == Outcome::GapFill && hours == MarketHours::Continuous {

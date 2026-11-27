@@ -244,6 +244,7 @@ impl Session {
         };
         if let Some(held) = self.security_series.get(&key) {
             let covered = held
+                .candles
                 .as_ref()
                 .is_some_and(|candles| !inside(candles).is_empty());
             if realtime {
@@ -258,7 +259,8 @@ impl Session {
         if realtime && self.footprints.live_is_due(bar.open_time) {
             self.footprints.live = Some((bar.open_time, Instant::now()));
         }
-        let candles = self.series(key)?;
+        // The footprint cache above decides when its series is fetched again: no second policy.
+        let candles = self.series(key, false)?;
         let found = inside(&candles);
         (!found.is_empty()).then_some((candles, found))
     }

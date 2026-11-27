@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, atomic::AtomicBool};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::fast_hash::FastMap;
 use super::state::{AlertEvent, RuntimeState};
@@ -74,7 +74,12 @@ pub struct Session {
     pub input_variables: HashMap<usize, String>,
     pub linkage: LibraryLinkage,
     pub security_data: Option<Box<dyn SecurityDataProvider>>,
-    pub security_series: HashMap<super::support::SecurityKey, Option<std::sync::Arc<Vec<Kline>>>>,
+    pub security_series: HashMap<super::support::SecurityKey, SeriesAnswer>,
+    /// How long a series the provider did not give is not asked for again (see [`SeriesAnswer`]).
+    pub security_retry_after: Duration,
+    /// How old a series the provider gave may be before a realtime tick asks for it again, so a
+    /// finer or foreign series learns of the candles that opened since (see [`SeriesAnswer`]).
+    pub security_live_refresh: Duration,
     pub library_constants: FastMap<String, RuntimeValue>,
     pub constants_in_progress: HashSet<String>,
     pub committed: RuntimeState,
@@ -130,6 +135,15 @@ pub struct Session {
     pub last_bar_index: i64,
     pub last_bar_time: Option<i64>,
     pub first_bar_time: Option<i64>,
+    /// Where the history the chart was loaded with ends (`load_history`): the close of its last bar,
+    /// the open of the live bar that may follow. None until a history is loaded.
+    ///
+    /// With a live bar after the history it is the moment of the load when `now_ms` is known, which
+    /// lies inside that bar: the series a request reads split into history and realtime there, not
+    /// where the chart's bars do.
+    pub history_end: Option<i64>,
+    /// The wall-clock time of the run (the app's update), when known. Not reset with the history.
+    pub now_ms: Option<i64>,
     pub visible_range: Option<(i64, i64)>,
     pub last_committed_open_time: Option<i64>,
     pub once_per_bar_ledger: HashSet<usize>,
@@ -150,8 +164,14 @@ pub struct Session {
     /// The chart variables as of a skipped bar, for the one replayed evaluation that reads them
     /// instead of the current bar's.
     pub(crate) replay_globals: Option<FastMap<String, RuntimeValue>>,
+    /// The market grid of the series a request runs on; None on the chart, whose own is
+    /// `symbol.grid`.
+    pub(crate) request_grid: Option<crate::model::market::bucket::Grid>,
     /// Whether `series_bars` is kept.
     keeps_series_bars: bool,
+    /// The chart's bar length in Pine's seconds (a month is 30 days): what `timeframe.in_seconds()`
+    /// answers and what other timeframes are compared with. It is a length, not an extent: where a
+    /// bar ends is [`Session::bar_end`].
     pub bar_seconds: f64,
     /// The chart's own bar length while a `request.*()` call evaluates on another timeframe, which is
     /// when `bar_seconds` is that timeframe's.
@@ -161,6 +181,10 @@ pub struct Session {
     /// The length of the chart's own bars when it cannot be read off their open times: a
     /// price-based chart's bars follow price, not time.
     pub fixed_bar_seconds: Option<f64>,
+    /// The length of the chart's timeframe, as the chart is set to it. Without it the length is
+    /// read off the last two bars' open times, which lies where a bucket is cut short (the last
+    /// one of a day, the first of a session after a gap).
+    pub configured_bar_seconds: Option<f64>,
     pub(crate) drawing_limits: drawings::DrawingLimits,
     supplied_mintick: Option<f64>,
     pub(crate) deadline_at: Option<Instant>,
@@ -211,16 +235,37 @@ impl From<Diagnostic> for RunError {
 }
 
 impl Session {
+    /// Where `bar` ends, exclusive. A time-based bar ends where its own close says: a month of 31
+    /// days, the bucket a day cuts short (the last of a `59s` day lasts 24 s) and a bar a provider
+    /// stamps at its own offset all differ from `bar_seconds`. A price-based chart's bars have no
+    /// close of their own (their times say nothing of the timeframe), and a bar with no usable close
+    /// is as long as `bar_seconds`, a month, quarter or year the calendar's (`bucket::close_time`).
+    pub(crate) fn bar_end(&self, bar: &Kline) -> i64 {
+        if self.fixed_bar_seconds.is_none() && bar.close_time > bar.open_time {
+            bar.close_time + 1
+        } else {
+            crate::pine::time::bucket::close_time(self.symbol.grid, bar.open_time, self.bar_seconds)
+        }
+    }
+
+    /// The chart's bar length when it is told rather than read off the bars: a price-based
+    /// chart's candle length, else the timeframe the chart is set to.
+    pub(crate) fn known_bar_seconds(&self) -> Option<f64> {
+        self.fixed_bar_seconds.or(self.configured_bar_seconds)
+    }
+
     pub fn reset(&mut self, inputs: Option<HashMap<String, InputValue>>) {
         if let Some(inputs) = inputs {
             self.inputs = inputs;
         }
         self.restart_state();
+        self.security_series.clear();
         self.logs.restart();
-        self.bar_seconds = self.fixed_bar_seconds.unwrap_or(0.0);
+        self.bar_seconds = self.known_bar_seconds().unwrap_or(0.0);
         self.last_bar_index = -1;
         self.last_bar_time = None;
         self.first_bar_time = None;
+        self.history_end = None;
         self.mintick = self.supplied_mintick.unwrap_or(DEFAULT_MINTICK);
         self.deadline_at = None;
     }
@@ -240,6 +285,10 @@ impl Session {
         self.emitted_alerts.clear();
         self.footprints.clear();
         self.series_bars.clear();
+        // A rebuild is a new run: what the provider could not give is asked for again, what it
+        // gave is kept.
+        self.security_series
+            .retain(|_, answer| answer.candles.is_some());
     }
 
     /// Installs a cooperative cancellation flag. Long history runs and instruction-heavy bars
@@ -248,6 +297,24 @@ impl Session {
         self.cancellation = Some(cancellation);
     }
 }
+
+/// What the provider answered for one series, and when. A series it gave is a fact about the run
+/// and is kept; one it did not give (a failed request, a provider out of reach) is only how things
+/// stood at `asked`, so it is asked for again once [`Session::security_retry_after`] has passed, and
+/// at once after a rebuild. Candles of none (`Some` of an empty list) is an answer, not a failure.
+pub struct SeriesAnswer {
+    pub candles: Option<Arc<Vec<Kline>>>,
+    pub asked: Instant,
+}
+
+/// How long a series the provider gave is trusted on a realtime tick before it is asked for again:
+/// the host's own cache answers a second ask inside its 30 s lifetime, so a shorter window would
+/// only repeat what it holds.
+pub(super) const SECURITY_LIVE_REFRESH: Duration = Duration::from_secs(30);
+
+/// How long the provider is left alone after it gave no series: one ask a window bounds what a
+/// failing provider costs a live chart (each ask spends the host's retries).
+pub(super) const SECURITY_RETRY_AFTER: Duration = Duration::from_secs(15);
 
 /// A script that stopped on a runtime error.
 struct Halted {

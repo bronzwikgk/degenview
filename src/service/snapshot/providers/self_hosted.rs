@@ -6,6 +6,7 @@ use super::{
     FieldKind, FieldSpec, Glyph, Link, Logo, ProviderDescriptor, Purpose, Readiness, Request,
     SecretPresence, Secrets, SnapshotProvider,
 };
+use crate::i18n::{Marked, tr, tr_noop};
 use crate::model::chart::snapshot::{
     FieldValues, SELF_HOSTED, SharedSnapshot, SnapshotHost, UploadError, parse_upload_response,
 };
@@ -26,51 +27,58 @@ fn host_problem(text: &str) -> Option<&'static str> {
 }
 
 fn token_problem(text: &str) -> Option<&'static str> {
-    (!token_is_valid(text.trim()))
-        .then_some("A token has no spaces and only plain letters, digits and symbols.")
+    (!token_is_valid(text.trim())).then_some(tr!(
+        "A token has no spaces and only plain letters, digits and symbols."
+    ))
 }
 
 static DESCRIPTOR: ProviderDescriptor = ProviderDescriptor {
     id: SELF_HOSTED,
-    name: "Host your own",
-    summary: "Upload to a server you run",
+    name: tr_noop!("Host your own"),
+    summary: tr_noop!("Upload to a server you run"),
     logo: Logo::Glyph(Glyph::Server),
     setup_steps: &[
-        "Run DegenView Snapshots on a server you control, or any host that implements the same protocol.",
-        "Enter its upload address below. Add the access token if the host asks for one.",
+        tr_noop!(
+            "Run DegenView Snapshots on a server you control, or any host that implements the same protocol."
+        ),
+        tr_noop!("Enter its upload address below. Add the access token if the host asks for one."),
     ],
     links: &[Link {
-        label: "DegenView Snapshots on GitHub",
+        label: tr_noop!("DegenView Snapshots on GitHub"),
         url: "https://github.com/degenview/snapshots",
     }],
-    notice: "Images go to the host you enter, which you run or trust. Whoever has a link can open the image, and the host decides how long it keeps it.",
+    notice: tr_noop!(
+        "Images go to the host you enter, which you run or trust. Whoever has a link can open the image, and the host decides how long it keeps it."
+    ),
     fields: &[
         FieldSpec {
             key: HOST,
-            title: "Upload address",
-            hint: "An https:// address that takes the image and answers with a link.",
+            title: tr_noop!("Upload address"),
+            hint: tr_noop!("An https:// address that takes the image and answers with a link."),
             placeholder: "https://snapshots.example.com/v1/snapshots",
             kind: FieldKind::Text,
             required: true,
             default: "",
             env: None,
             account: None,
-            needed: "Add the address of your snapshot host in Settings ▸ Snapshots to share.",
-            remove_label: "",
+            needed: tr_noop!(
+                "Add the address of your snapshot host in Settings ▸ Snapshots to share."
+            ),
+            remove_label: Marked::EMPTY,
             validate: host_problem,
         },
         FieldSpec {
             key: TOKEN,
-            title: "Access token (optional)",
-            hint: "Sent as a bearer token, if the host asks for one.",
+            title: tr_noop!("Access token (optional)"),
+            hint: tr_noop!("Sent as a bearer token, if the host asks for one."),
             placeholder: "",
             kind: FieldKind::Secret,
             required: false,
             default: "",
             env: Some(TOKEN_ENV),
             account: Some(TOKEN_ACCOUNT),
-            needed: "",
-            remove_label: "Remove token",
+            needed: Marked::EMPTY,
+            remove_label: tr_noop!("Remove token"),
             validate: token_problem,
         },
     ],
@@ -95,14 +103,17 @@ impl SnapshotProvider for SelfHosted {
             Readiness::Ready
         } else {
             Readiness::Needs(
-                "Add the address of your snapshot host in Settings ▸ Snapshots to share."
+                tr!("Add the address of your snapshot host in Settings ▸ Snapshots to share.")
                     .to_owned(),
             )
         }
     }
 
     fn label(&self, settings: &FieldValues) -> String {
-        host_of(settings).map_or_else(|| DESCRIPTOR.name.to_owned(), |host| host.authority())
+        host_of(settings).map_or_else(
+            || DESCRIPTOR.name.text().to_owned(),
+            |host| host.authority(),
+        )
     }
 
     fn consent_key(&self, settings: &FieldValues) -> String {
@@ -114,13 +125,13 @@ impl SnapshotProvider for SelfHosted {
         // somewhere new, so the question says it goes along.
         present
             .has(TOKEN)
-            .then(|| "Your saved access token is sent with it.".to_owned())
+            .then(|| tr!("Your saved access token is sent with it.").to_owned())
     }
 
     fn status_line(&self, settings: &FieldValues) -> String {
         host_of(settings).map_or_else(
-            || DESCRIPTOR.summary.to_owned(),
-            |host| format!("Uploads to {}", host.authority()),
+            || DESCRIPTOR.summary.text().to_owned(),
+            |host| tr!("Uploads to {host}", host = host.authority()),
         )
     }
 

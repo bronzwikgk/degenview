@@ -18,8 +18,11 @@ Details: [chart types](../chart-types.md), [chart canvas](../chart-canvas.md),
   screens). Watchlist uses `PriceFormat::AUTO`.
 - Automatic precision deliberately differs from Swift: no decimals from 1,000, two from 1, four
   significant digits below 1 (`0.5864`, `0.05864`, `0.003142`), leading-zero count below `0.001`
-  (`0.0₅278`). Axis ticks add places their spacing needs, and below 1 take the same places across
-  the whole axis (`0.1100`, `0.0900`). Grid ticks: `format_tick`; `ui::chart::price_text`
+  (`0.0₅278`). The places come from the price's own decade, never from its rounded label
+  (`0.9999` is in the tenths). Axis ticks add places their spacing needs, and below 1 take the
+  same places across the whole axis (`0.1100`, `0.0900`; a step of 0.1 reads `0.80`, `0.90`,
+  `1.00`). The spacing is `tick_step`, kept to nine digits so float error in a difference of
+  ticks never changes a label. Grid ticks: `format_tick`; `ui::chart::price_text`
   paints the subscript count.
 - `axis_decimals` (0–12) and `axis_small_prices` stay chart-local across template application.
 
@@ -83,6 +86,8 @@ Read [chart overlays](../chart-overlays.md) first. Short rules:
 
 ## Types, canvas, and templates
 
+- The countdown to a bar's close (`model::chart::countdown`) is a function of the clock, resolved by the workspace once a frame (`Chart::bar_countdown`) and pushed into the card (`ChartCard::set_countdown`); the card and the snapshot path never read the clock. It lives on the last-price tag (`draw_last_price`), never as a widget or overlay, and the axis is measured with its widest text whatever it shows ([chart canvas](../chart-canvas.md#countdown-to-bar-close)).
+
 - Never modify canonical candles. `model::chart::synthetic` builds price-based types; cached
   `constructed_series` feeds scale, indicators, Pine, alerts, drawings, replay. Standard types keep
   real OHLC for scripts.
@@ -97,8 +102,8 @@ Read [chart overlays](../chart-overlays.md) first. Short rules:
 - Resolve canvas/theme once per frame with `CanvasStyle::resolve`; painters never read canvas colors
   from `theme::*`. Grid and axis labels share `canvas::{price_ticks,time_ticks}`. Price range,
   visible-window, pane-split geometry stay pure in `model/chart/canvas/mod.rs`.
-- Pane order/collapse live on `PineInstance`; maximize is card view state. Buttons report clicks,
-  `ChartCard` applies them.
+- Pane order lives in the `PineInstance` list, collapse and dragged height in `PineInstance::pane`
+  (`PaneLayout`); maximize is card view state. Buttons report clicks, `ChartCard` applies them.
 - Templates snapshot `ChartAppearance`. Apply with `ChartCard::apply_template`; plan all
   apply-to-all changes before applying any, so type changes go through `set_chart_type`.
   `ChartTemplateStore` re-reads before writes, refuses to overwrite undecodable rows.
@@ -171,6 +176,9 @@ Read [chart overlays](../chart-overlays.md) first. Short rules:
 
 ## Context menus
 
+- A right-click on the plot with a drawing tool or Zoom In armed only puts it down (axes open their menu) (`ChartCard::context_request`
+  is the one arbiter; `DrawingTools::put_down` is the one way to let go, shared with Esc). Never add
+  a second place that decides what a right-click does.
 - One menu per right-click: drawing's (`ui::drawing::layer::menu`), else chart's
   (`model::chart::context` builds, `ui::chart::context_menu` draws, `workspace/chart/context/mod.rs` runs).
   New entry: a `Command`, a row in the model's `menu`, an arm in `run_context_command`. Menus never

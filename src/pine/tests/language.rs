@@ -177,7 +177,7 @@ fn windowed_statistics_follow_the_reference_formulas() {
     );
     close_to(&session, "alma", 104.685_673_600_238_26);
     close_to(&session, "nearest", 105.0);
-    close_to(&session, "linear", 104.6);
+    close_to(&session, "linear", 105.0);
     close_to(&session, "median", 103.0);
     // close 101…105: odd values 101, 103, 105 map to 2.0 (three of them), even ones to 1.0.
     close_to(&session, "common", 2.0);
@@ -442,6 +442,103 @@ fn a_parameter_may_reuse_a_builtin_function_name_with_a_warning() {
 }
 
 #[test]
+fn ta_supertrend_must_be_declared_as_a_tuple() {
+    let scalar = diagnostic_codes("st = ta.supertrend(3, 10)\nplot(st)");
+    assert!(scalar.contains(&"PINE3069".to_owned()), "{scalar:?}");
+    let tuple = diagnostic_codes("[line, direction] = ta.supertrend(3, 10)\nplot(line)");
+    assert!(tuple.is_empty(), "{tuple:?}");
+    // A script's own method of that name, called on an object called `ta`, is not the builtin.
+    let method = diagnostic_codes(
+        "type Probe\n    float value = 1.0\n\
+         method supertrend(Probe this, float factor, int length) => this.value * factor + length\n\
+         ta = Probe.new()\n\
+         st = ta.supertrend(3.0, 10)\n\
+         plot(st)",
+    );
+    assert!(!method.contains(&"PINE3069".to_owned()), "{method:?}");
+}
+
+/// Every form below is a compile error on TradingView (CE10123, CE10092, CE10163, CE10066 or
+/// CE10038, probed on a 5-minute BTCUSDT chart): a builtin that returns a tuple has no value of its
+/// own.
+#[test]
+fn a_tuple_builtin_cannot_stand_for_one_value() {
+    let one_value = [
+        "plot(ta.supertrend(3, 10))",
+        "x = ta.supertrend(3, 10)[0]\nplot(x)",
+        "float st = 0.0\nst := ta.supertrend(3, 10)\nplot(st)",
+        "x = ta.supertrend(3, 10) + 1\nplot(x)",
+        "plot(math.abs(ta.supertrend(3, 10)))",
+        "x = close > open ? ta.supertrend(3, 10) : 0.0\nplot(x)",
+        "var st = ta.supertrend(3, 10)\nplot(1)",
+        "float st = ta.supertrend(3, 10)\nplot(st)",
+        "m = ta.macd(close, 12, 26, 9)\nplot(close)",
+        "plot(ta.bb(close, 20, 2))",
+        "plot(ta.dmi(14, 14))",
+        "plot(ta.kc(close, 20, 1.5))",
+        // A function that returns the tuple is no different from the builtin.
+        "f() =>\n    ta.supertrend(3, 10)\nx = f()\nplot(1)",
+        "f() =>\n    ta.supertrend(3, 10)\nplot(f())",
+        // A user function's parameter and `array.from` take one value each.
+        "g(x) => x\nplot(g(ta.supertrend(3, 10)))",
+        "a = array.from(ta.supertrend(3, 10))\nplot(close)",
+        "t = [ta.supertrend(3, 10), 1]\nplot(close)",
+    ];
+    for body in one_value {
+        let codes = diagnostic_codes(body);
+        assert!(codes.contains(&"PINE3069".to_owned()), "{body}: {codes:?}");
+    }
+}
+
+#[test]
+fn a_tuple_declaration_names_every_value_of_a_tuple_builtin() {
+    let wrong = [
+        "[a, b, c] = ta.supertrend(3, 10)\nplot(a)",
+        "[a] = ta.supertrend(3, 10)\nplot(a)",
+        "[a, b] = ta.macd(close, 12, 26, 9)\nplot(a)",
+        "[a, b, c, d] = ta.bb(close, 20, 2)\nplot(a)",
+    ];
+    for body in wrong {
+        let codes = diagnostic_codes(body);
+        assert!(codes.contains(&"PINE3070".to_owned()), "{body}: {codes:?}");
+    }
+    let right = [
+        "[a, b] = ta.supertrend(3, 10)\nplot(a)\nplot(b)",
+        "[a, b, c] = ta.macd(close, 12, 26, 9)\nplot(a + b + c)",
+        "[_, upper, lower] = ta.bb(close, 20, 2)\nplot(upper - lower)",
+        "[a, b, c] = ta.dmi(14, 14)\nplot(a + b + c)",
+        "[a, b, c] = ta.kc(close, 20, 1.5)\nplot(a + b + c)",
+    ];
+    for body in right {
+        let codes = diagnostic_codes(body);
+        assert!(codes.is_empty(), "{body}: {codes:?}");
+    }
+}
+
+#[test]
+fn a_tuple_builtin_may_be_returned_and_requested() {
+    let allowed = [
+        // The expression `request.security` evaluates elsewhere, positional or named.
+        "[a, b] = request.security(syminfo.tickerid, \"5\", ta.supertrend(3, 10))\nplot(a + b)",
+        "[a, b] = request.security(syminfo.tickerid, \"5\", expression = ta.supertrend(3, 10))\nplot(a + b)",
+        // A function whose last statement is the tuple returns it.
+        "f() =>\n    ta.supertrend(3, 10)\n[a, b] = f()\nplot(a + b)",
+        "[a, b] = request.security_lower_tf(syminfo.tickerid, \"1\", ta.supertrend(3, 10))\nplot(close)",
+        // A statement on its own discards the tuple.
+        "ta.supertrend(3, 10)\nplot(close)",
+        // A block that ends in the tuple hands it to the declaration.
+        "[x, y] = if close > open\n    ta.supertrend(3, 10)\nelse\n    [1.0, 1]\nplot(x)",
+        "[x, y] = switch\n    close > open => ta.supertrend(3, 10)\n    => [1.0, 1]\nplot(x)",
+        "for i = 0 to 1\n    [a, b] = ta.supertrend(3, 10)\nplot(close)",
+        "f() =>\n    [a, b] = ta.supertrend(3, 10)\n    [a, b]\n[x, y] = f()\nplot(x)",
+    ];
+    for body in allowed {
+        let codes = diagnostic_codes(body);
+        assert!(codes.is_empty(), "{body}: {codes:?}");
+    }
+}
+
+#[test]
 fn int_truncates_toward_zero() {
     let session = run(
         "up = int(2.9)\n\
@@ -619,7 +716,7 @@ fn a_zone_the_table_lacks_is_warned_about() {
 }
 
 #[test]
-fn ratios_with_nothing_to_divide_are_na_not_nan() {
+fn ratios_with_nothing_to_divide_are_na_or_what_tradingview_gives() {
     // A flat market: no money flow in either direction, and a zero-width range.
     let session = run(
         "flat = 100.0\n\
@@ -628,7 +725,9 @@ fn ratios_with_nothing_to_divide_are_na_not_nan() {
          plain = ta.wpr(3)",
         5,
     );
-    assert_eq!(value(&session, "flow"), RuntimeValue::Na);
+    // No down flow is 100 whether or not there is an up flow (TradingView, probe P10).
+    assert_eq!(value(&session, "flow"), RuntimeValue::Float(100.0));
+    // A source sitting on a flat window repeats the previous %K, and there is none yet.
     assert_eq!(value(&session, "pos"), RuntimeValue::Na);
     // The bars themselves still span 4 points, so %R is defined.
     assert!(matches!(value(&session, "plain"), RuntimeValue::Float(_)));
@@ -1180,6 +1279,320 @@ fn a_function_local_keeps_a_history_per_call_site() {
 }
 
 #[test]
+fn the_history_of_a_local_in_a_block_carries_over_the_bars_the_block_did_not_run() {
+    // `u` is set on even bars only. `u[1]` is its last committed value as of the bar before: on
+    // bar 2 that is the value bar 0 left (bar 1 did not run the block), not `na`.
+    let session = run(
+        "f() =>\n    out = -1.0\n    if bar_index % 2 == 0\n        u = bar_index * 10.0\n        out := nz(u[1], -5.0)\n    out\n\
+         r = f()",
+        5,
+    );
+    assert_eq!(value(&session, "r"), RuntimeValue::Float(20.0));
+    let first = run(
+        "f() =>\n    out = -1.0\n    if bar_index % 2 == 0\n        u = bar_index * 10.0\n        out := nz(u[1], -5.0)\n    out\n\
+         r = f()",
+        1,
+    );
+    assert_eq!(
+        value(&first, "r"),
+        RuntimeValue::Float(-5.0),
+        "no earlier value on the first bar"
+    );
+}
+
+/// The values of the plot titled `title` after `body` ran over `count` bars.
+fn plot_values(body: &str, count: usize, title: &str) -> Vec<Option<f64>> {
+    let session = run(body, count);
+    session
+        .output()
+        .plots
+        .iter()
+        .find(|plot| plot.title.as_deref() == Some(title))
+        .map(|plot| plot.values.clone())
+        .unwrap_or_else(|| panic!("no plot {title}"))
+}
+
+/// `history` applied to a call under a condition that holds on every second bar, against the same
+/// call run on every bar. TradingView returns the every-bar value `offset` bars back wherever the
+/// condition holds (measured: `ta.sma`, `ta.ema`, an offset of 2, a user function) and `na` elsewhere.
+fn assert_lazy_history_reads_the_every_bar_series(prelude: &str, call: &str, offset: usize) {
+    let body = format!(
+        "{prelude}\ncond = bar_index % 2 == 0\nevery = {call}\nlazy = cond ? {call}[{offset}] : na\n\
+         plot(every, \"every\")\nplot(lazy, \"lazy\")"
+    );
+    let every = plot_values(&body, 40, "every");
+    let lazy = plot_values(&body, 40, "lazy");
+    let mut compared = 0;
+    for (bar, value) in lazy.iter().enumerate() {
+        if bar % 2 != 0 {
+            assert_eq!(*value, None, "bar {bar}: the condition is false");
+        } else if bar >= offset {
+            let expected = every[bar - offset];
+            match (value, expected) {
+                (Some(got), Some(want)) => {
+                    assert!((got - want).abs() < 1e-9, "bar {bar}: {got} vs {want}");
+                    compared += 1;
+                }
+                _ => assert_eq!(*value, expected, "bar {bar} for {call}[{offset}]"),
+            }
+        }
+    }
+    assert!(compared > 10, "the run has values to compare for {call}");
+}
+
+#[test]
+fn a_history_of_a_call_in_a_ternary_arm_reads_the_series_the_call_has_on_every_bar() {
+    assert_lazy_history_reads_the_every_bar_series("", "ta.sma(close, 3)", 1);
+    assert_lazy_history_reads_the_every_bar_series("", "ta.ema(close, 5)", 1);
+    assert_lazy_history_reads_the_every_bar_series("", "ta.sma(close, 3)", 2);
+    assert_lazy_history_reads_the_every_bar_series("f() =>\n    ta.sma(close, 3)\n", "f()", 1);
+}
+
+#[test]
+fn a_call_in_a_ternary_arm_without_a_history_keeps_its_own_state() {
+    // Run on even bars only, `ta.sma(close, 3)` averages the closes of bars t, t-2 and t-4: the close
+    // of bar t is 101 + t, so the average is 99 + t, not the every-bar 100 + t.
+    let lazy = plot_values(
+        "cond = bar_index % 2 == 0\nlazy = cond ? ta.sma(close, 3) : na\nplot(lazy, \"lazy\")",
+        20,
+        "lazy",
+    );
+    for bar in (4..20).step_by(2) {
+        assert_eq!(lazy[bar], Some(99.0 + bar as f64), "bar {bar}");
+    }
+    // The same call twice, once with a history: the plain site keeps its own state.
+    let both = plot_values(
+        "cond = bar_index % 2 == 0\nlazy = cond ? ta.sma(close, 3) : na\n\
+         ahead = cond ? ta.sma(close, 3)[1] : na\nplot(lazy, \"lazy\")\nplot(ahead, \"ahead\")",
+        20,
+        "lazy",
+    );
+    assert_eq!(both, lazy);
+}
+
+#[test]
+fn a_history_of_a_call_in_the_right_side_of_and_or_reads_the_every_bar_series() {
+    // The global `ta.sma(close, 3)` is 100 + j on bar j, so `[1] > 105` holds from bar 7 on.
+    let and = plot_values(
+        "cond = bar_index % 2 == 0\nhit = cond and ta.sma(close, 3)[1] > 105\n\
+         plot(hit ? 1.0 : 0.0, \"hit\")",
+        20,
+        "hit",
+    );
+    let or = plot_values(
+        "cond = bar_index % 2 == 0\nhit = not cond or ta.sma(close, 3)[1] > 105\n\
+         plot(hit ? 1.0 : 0.0, \"hit\")",
+        20,
+        "hit",
+    );
+    for bar in 0..20 {
+        let even = bar % 2 == 0;
+        assert_eq!(
+            and[bar],
+            Some(if even && bar >= 8 { 1.0 } else { 0.0 }),
+            "and, bar {bar}"
+        );
+        assert_eq!(
+            or[bar],
+            Some(if !even || bar >= 8 { 1.0 } else { 0.0 }),
+            "or, bar {bar}"
+        );
+    }
+}
+
+#[test]
+fn a_history_of_a_call_in_a_switch_or_if_expression_arm_reads_the_every_bar_series() {
+    let every = plot_values("plot(ta.sma(close, 3), \"every\")", 30, "every");
+    for (name, body) in [
+        (
+            "switch",
+            "v = switch\n    bar_index % 2 == 0 => ta.sma(close, 3)[1]\n    => na\nplot(v, \"v\")",
+        ),
+        (
+            "if",
+            "v = if bar_index % 2 == 0\n    ta.sma(close, 3)[1]\nelse\n    na\nplot(v, \"v\")",
+        ),
+    ] {
+        let v = plot_values(body, 30, "v");
+        for bar in 3..30 {
+            let want = if bar % 2 == 0 { every[bar - 1] } else { None };
+            assert_eq!(v[bar], want, "{name}, bar {bar}");
+        }
+    }
+}
+
+#[test]
+fn a_history_of_a_call_in_a_ternary_arm_inside_a_function_reads_the_every_bar_series() {
+    let body = "g(c) =>\n    c ? ta.sma(close, 3)[1] : na\n\
+                cond = bar_index % 2 == 0\nr = g(cond)\nplot(r, \"r\")\nplot(ta.sma(close, 3), \"every\")";
+    let r = plot_values(body, 30, "r");
+    let every = plot_values(body, 30, "every");
+    for bar in 3..30 {
+        let want = if bar % 2 == 0 { every[bar - 1] } else { None };
+        assert_eq!(r[bar], want, "bar {bar}");
+    }
+}
+
+#[test]
+fn a_history_of_a_call_in_a_ternary_arm_inside_a_loop_is_read_on_every_iteration() {
+    let body = "cond = bar_index % 2 == 0\ntotal = 0.0\nfor i = 0 to 0\n    \
+                total += cond ? ta.sma(close, 3)[1] : 0.0\nplot(total, \"total\")\n\
+                plot(ta.sma(close, 3), \"every\")";
+    let total = plot_values(body, 30, "total");
+    let every = plot_values(body, 30, "every");
+    for bar in 3..30 {
+        let want = if bar % 2 == 0 {
+            every[bar - 1].unwrap()
+        } else {
+            0.0
+        };
+        assert_eq!(total[bar], Some(want), "bar {bar}");
+    }
+}
+
+#[test]
+fn a_call_that_could_fail_is_not_run_ahead_of_its_guard() {
+    // `array.get(values, 0)` on an empty array is a run-time error; the guard keeps it from running.
+    let session = run(
+        "values = array.new_float(0)\nif bar_index > 3\n    array.push(values, close)\n\
+         ok = array.size(values) > 0 and array.get(values, 0)[1] > 0\n\
+         pick = array.size(values) > 0 ? array.get(values, 0)[1] : -1.0",
+        10,
+    );
+    assert_eq!(value(&session, "ok"), RuntimeValue::Bool(true));
+}
+
+#[test]
+fn a_history_whose_offset_the_guard_protects_is_not_run_ahead_of_it() {
+    // `close[lag]` raises PINE4006 for a negative `lag`: on bar 0 `lag` is -1 and the guard is false,
+    // so neither the call nor its argument may run. On bar 1 the branch runs (`close[0]` is that bar's 102) and bar 2 reads it.
+    for body in [
+        "lag = bar_index - 1\nr = lag >= 0 ? math.abs(close[lag])[1] : na\nplot(r, \"r\")",
+        "f(l) =>\n    math.abs(close[l])\nlag = bar_index - 1\nr = lag >= 0 ? f(lag)[1] : na\nplot(r, \"r\")",
+    ] {
+        let r = plot_values(body, 6, "r");
+        assert_eq!(r[..2], [None, None], "{body}");
+        assert_eq!(r[2], Some(102.0), "{body}");
+    }
+}
+
+#[test]
+fn a_function_that_changes_state_is_not_run_ahead_of_its_condition() {
+    let session = run(
+        "var seen = array.new_float(0)\nf() =>\n    array.push(seen, close)\n    array.size(seen)\n\
+         cond = bar_index % 2 == 0\nr = cond ? f()[1] : na\ncount = array.size(seen)",
+        10,
+    );
+    assert_eq!(value(&session, "count"), RuntimeValue::Int(5));
+}
+
+#[test]
+fn a_request_reading_a_variable_with_a_lazy_history_replays_the_hoisted_call() {
+    // `x` reads the moved call; the slice of the request has to run it too, or `y` would be `na`.
+    let source = "x = int(close) % 2 == 1 ? ta.sma(close, 3)[1] : na\n\
+                  y = request.security(syminfo.tickerid, timeframe.period, x)\nplot(x, \"x\")\nplot(y, \"y\")";
+    let x = plot_values(source, 30, "x");
+    let y = plot_values(source, 30, "y");
+    assert!(x.iter().flatten().count() > 10, "the script ran");
+    assert_eq!(x, y);
+}
+
+#[test]
+fn a_lazy_history_inside_a_request_expression_still_runs() {
+    let source = "y = request.security(syminfo.tickerid, timeframe.period, int(close) % 2 == 1 ? ta.sma(close, 3)[1] : na)\nplot(y, \"y\")";
+    assert_eq!(plot_values(source, 12, "y").len(), 12);
+}
+
+#[test]
+fn a_lazy_history_directly_inside_a_request_expression_is_not_run_ahead() {
+    // Supported scope: the hoist works on the chart's own statements. A request's expression runs on
+    // the requested series, so a lazy `call[]` written inside it keeps the pre-hoist reading (`na` on
+    // the bars the branch skips, which is every bar here). The same expression on the chart is hoisted.
+    let guarded = "int(close) % 2 == 1 ? ta.sma(close, 3)[1] : na";
+    let source = format!(
+        "y = request.security(syminfo.tickerid, timeframe.period, {guarded})\n\
+         x = {guarded}\nplot(x, \"x\")\nplot(y, \"y\")"
+    );
+    assert!(plot_values(&source, 30, "x").iter().flatten().count() > 10);
+    assert!(plot_values(&source, 30, "y").iter().all(Option::is_none));
+}
+
+// What may run ahead of its guard: a hoisted call runs on bars its branch skips, so it must not be
+// able to fail there. Each script keeps a call that fails behind a guard that never holds; the run
+// panics on the first error, so these pass only when the call stays where it is.
+
+#[test]
+fn a_function_that_raises_is_not_run_ahead_of_its_guard() {
+    let body = "f() =>\n    runtime.error(\"unreachable\")\n    1.0\n\
+                never = bar_index < 0\nr = never ? f()[1] : na\nplot(r, \"r\")";
+    assert_eq!(plot_values(body, 6, "r"), vec![None; 6]);
+}
+
+#[test]
+fn a_timeframe_the_guard_keeps_out_is_not_read_ahead_of_it() {
+    // `time` and `time_close` raise PINE4021 for a timeframe they cannot read.
+    for call in ["time(tf)", "time_close(tf)"] {
+        let body = format!(
+            "tf = \"nonsense\"\nnever = bar_index < 0\nr = never ? {call}[1] : na\nplot(r, \"r\")"
+        );
+        assert_eq!(plot_values(&body, 6, "r"), vec![None; 6], "{call}");
+    }
+}
+
+#[test]
+fn a_loop_that_cannot_run_is_not_run_ahead_of_its_guard() {
+    // A zero step raises, and a bound the guard keeps out exhausts the per-bar instruction budget
+    // (PINE8004); neither may run on a bar whose branch is skipped.
+    for (name, helper, call) in [
+        (
+            "zero step",
+            "f() =>\n    s = 0.0\n    for i = 0 to 3 by 0\n        s += 1.0\n    s\n",
+            "f()",
+        ),
+        (
+            "bound the guard keeps out",
+            "f(n) =>\n    s = 0.0\n    for i = 0 to n\n        s += 1.0\n    s\n",
+            "f(2000000000)",
+        ),
+        (
+            "literal bound past the budget",
+            "f() =>\n    s = 0.0\n    for i = 0 to 30000000\n        s += 1.0\n    s\n",
+            "f()",
+        ),
+        (
+            "loops that multiply",
+            "f() =>\n    s = 0.0\n    for i = 0 to 10000\n        for j = 0 to 10000\n            s += 1.0\n    s\n",
+            "f()",
+        ),
+    ] {
+        let body =
+            format!("{helper}never = bar_index < 0\nr = never ? {call}[1] : na\nplot(r, \"r\")");
+        assert_eq!(plot_values(&body, 6, "r"), vec![None; 6], "{name}");
+    }
+}
+
+#[test]
+fn a_default_that_cannot_run_is_not_run_ahead_of_its_guard() {
+    // A call that leaves a parameter out evaluates its default, so the default is part of the
+    // function: `array.get` of an empty array raises, `math.random` moves every later draw.
+    let body = "values = array.new_float(0)\nf(v = array.get(values, 0)) =>\n    v\n\
+                never = bar_index < 0\nr = never ? f()[1] : na\nplot(r, \"r\")";
+    assert_eq!(plot_values(body, 6, "r"), vec![None; 6]);
+}
+
+#[test]
+fn a_loop_with_a_known_trip_count_is_still_run_ahead() {
+    let body = "f() =>\n    s = 0.0\n    for i = 0 to 3\n        s += close\n    s\n\
+                cond = bar_index % 2 == 0\nr = cond ? f()[1] : na\nplot(r, \"r\")\nplot(f(), \"every\")";
+    let r = plot_values(body, 20, "r");
+    let every = plot_values(body, 20, "every");
+    for bar in 2..20 {
+        let want = if bar % 2 == 0 { every[bar - 1] } else { None };
+        assert_eq!(r[bar], want, "bar {bar}");
+    }
+}
+
+#[test]
 fn trade_properties_read_the_closed_and_open_trades() {
     let source = "//@version=6\nstrategy(\"S\", default_qty_type = strategy.fixed, default_qty_value = 2)\n\
          if bar_index == 1\n    strategy.entry(\"L\", strategy.long)\n\
@@ -1321,6 +1734,129 @@ fn a_for_in_whose_index_and_value_hide_globals_gives_both_back() {
     assert_eq!(value(&session, "after_k"), RuntimeValue::Int(40));
     assert_eq!(value(&session, "after_v"), RuntimeValue::Float(2.5));
     assert_eq!(value(&session, "lagged_k"), RuntimeValue::Int(40));
+}
+
+#[test]
+fn a_for_in_over_an_empty_map_does_not_enter_the_body() {
+    let session = run(
+        "var map<float, float> a = map.new<float, float>()\n\
+         visits = 0\n\
+         for [ext1, ext2] in a\n    visits += 1\n    continue\n",
+        2,
+    );
+    assert_eq!(value(&session, "visits"), RuntimeValue::Int(0));
+}
+
+#[test]
+fn a_for_in_reads_float_keys_and_current_values_in_insertion_order() {
+    let session = run(
+        "a = map.new<float, float>()\n\
+         a.put(3, 10)\n\
+         a.put(1.5, 20)\n\
+         a.put(3.0, 11)\n\
+         first_key = 0.0\n\
+         first_value = 0.0\n\
+         last_key = 0.0\n\
+         last_value = 0.0\n\
+         for [k, v] in a\n    if k == 3.0\n        first_key := k\n        first_value := v\n        a.put(1.5, 21)\n        continue\n    last_key := k\n    last_value := v\n\
+         size = a.size()\n\
+         key_from_copy = a.copy().keys().get(0)\n",
+        2,
+    );
+    assert_eq!(value(&session, "first_key"), RuntimeValue::Float(3.0));
+    assert_eq!(value(&session, "first_value"), RuntimeValue::Float(11.0));
+    assert_eq!(value(&session, "last_key"), RuntimeValue::Float(1.5));
+    assert_eq!(value(&session, "last_value"), RuntimeValue::Float(21.0));
+    assert_eq!(value(&session, "size"), RuntimeValue::Int(2));
+    assert_eq!(value(&session, "key_from_copy"), RuntimeValue::Float(3.0));
+}
+
+#[test]
+fn a_for_in_rejects_map_key_changes_through_an_alias_even_before_break() {
+    let program = compiler::compile(
+        "//@version=6\nindicator(\"T\")\n\
+         a = map.new<string, int>()\n\
+         a.put(\"first\", 1)\n\
+         alias = a\n\
+         for [k, v] in a\n    alias.remove(k)\n    alias.put(\"second\", v)\n    break\n",
+        Limits::default(),
+        &NoLibraries,
+    );
+    assert!(program.is_valid(), "{:?}", program.diagnostics);
+    let mut session = Session::new(
+        program,
+        HashMap::new(),
+        Limits::default(),
+        None,
+        SymbolInfo::default(),
+        None,
+        None,
+    );
+    let Err(crate::pine::runtime::session::RunError::Script(error)) = session.evaluate(&bars(1))
+    else {
+        panic!("changing keys in the iterated map must fail");
+    };
+    assert_eq!(error.code, "PINE4039");
+}
+
+/// The code of the runtime error a script ends in.
+fn runtime_error_code(body: &str) -> String {
+    let program = compiler::compile(
+        &format!("//@version=6\nindicator(\"T\")\n{body}"),
+        Limits::default(),
+        &NoLibraries,
+    );
+    assert!(program.is_valid(), "{:?}", program.diagnostics);
+    let mut session = Session::new(
+        program,
+        HashMap::new(),
+        Limits::default(),
+        None,
+        SymbolInfo::default(),
+        None,
+        None,
+    );
+    let Err(crate::pine::runtime::session::RunError::Script(error)) = session.evaluate(&bars(1))
+    else {
+        panic!("the script must fail: {body}");
+    };
+    error.code
+}
+
+#[test]
+fn a_typed_map_refuses_what_the_checker_could_not_see_it_was_given() {
+    // `keep` hides the type from the checker, so the map itself has to refuse it.
+    let keep = "keep(x) =>\n    x\n";
+    for write in [
+        "m.put(keep(\"a\"), 1.0)",
+        "m.put(1, keep(\"b\"))",
+        "m.put(keep(1.5), 1.0)",
+    ] {
+        let body = format!("{keep}m = map.new<int, float>()\n{write}\n");
+        assert_eq!(runtime_error_code(&body), "PINE4040", "{write}");
+    }
+    let body = format!(
+        "{keep}m = map.new<int, float>()\nm.put(1, 1.5)\nn = map.new<string, float>()\n\
+         n.put(\"a\", 1.0)\nm.put_all(keep(n))\n"
+    );
+    assert_eq!(runtime_error_code(&body), "PINE4040");
+}
+
+#[test]
+fn put_all_copies_every_pair_of_another_map() {
+    let session = run(
+        "m = map.new<string, float>()\n\
+         n = map.new<string, int>()\n\
+         n.put(\"a\", 1)\n\
+         n.put(\"b\", 2)\n\
+         m.put(\"a\", 0.5)\n\
+         m.put_all(n)\n\
+         size = m.size()\n\
+         a = m.get(\"a\")\n",
+        1,
+    );
+    assert_eq!(value(&session, "size"), RuntimeValue::Int(2));
+    assert_eq!(value(&session, "a"), RuntimeValue::Float(1.0));
 }
 
 #[test]
@@ -1889,14 +2425,82 @@ fn text_sizes_may_be_numbers_of_points() {
 fn the_cell_properties_the_chart_cannot_draw_are_warned_about() {
     let codes = diagnostic_codes(
         "t = table.new(position.top_left, 1, 1)\n\
-         table.cell(t, 0, 0, \"x\", tooltip = \"tip\", text_font_family = font.family_monospace)\n\
+         table.cell(t, 0, 0, \"x\", tooltip = \"tip\", text_formatting = text.format_bold, text_font_family = font.family_monospace)\n\
          table.cell_set_tooltip(t, 0, 0, \"tip\")\n\
          table.cell_set_text_formatting(t, 0, 0, text.format_bold)\n\
          table.cell_set_text_font_family(t, 0, 0, font.family_monospace)",
     );
-    // The tooltip is drawn now: only the font family and the text formatting are still ignored.
+    // The tooltip and the font family are drawn: only the text formatting is still ignored.
     assert_eq!(codes.iter().filter(|c| *c == "PINE7001").count(), 1);
-    assert_eq!(codes.iter().filter(|c| *c == "PINE7005").count(), 2);
+    assert_eq!(codes.iter().filter(|c| *c == "PINE7005").count(), 1);
+}
+
+fn diagnostic_messages(body: &str) -> Vec<String> {
+    let source = format!("//@version=6\nindicator(\"T\")\n{body}");
+    compiler::compile(&source, Limits::default(), &NoLibraries)
+        .diagnostics
+        .into_iter()
+        .filter(|d| d.code.starts_with("PINE7"))
+        .map(|d| d.message)
+        .collect()
+}
+
+#[test]
+fn an_ignored_argument_is_warned_about_by_name_and_by_position() {
+    let named = diagnostic_messages(
+        "label.new(0, 1.0, \"x\", text_formatting = text.format_bold)\n\
+         box.new(0, 1.0, 1, 2.0, text_formatting = text.format_bold)",
+    );
+    // `text_formatting` is the last parameter of both, whichever way it is passed.
+    let by_position = diagnostic_messages(
+        "label.new(0, 1.0, \"x\", xloc.bar_index, yloc.price, color.red, label.style_label_down, color.white, size.normal, text.align_center, \"tip\", font.family_default, false, text.format_bold)\n\
+         box.new(0, 1.0, 1, 2.0, color.red, 1, line.style_solid, extend.none, xloc.bar_index, color.blue, \"t\", size.normal, color.white, text.align_center, text.align_center, text.wrap_none, font.family_default, false, text.format_bold)",
+    );
+    assert_eq!(named.len(), 2, "{named:?}");
+    // The box's positional `text.wrap_none` fills `text_wrap`, which is ignored too.
+    assert_eq!(by_position.len(), 3, "{by_position:?}");
+    assert!(by_position[1].contains("`text_wrap`"), "{by_position:?}");
+    assert_eq!([&by_position[0], &by_position[2]], [&named[0], &named[1]]);
+    let point_form = diagnostic_messages(
+        "label.new(chart.point.now(1.0), \"x\", xloc.bar_index, yloc.price, color.red, label.style_label_down, color.white, size.normal, text.align_center, \"tip\", font.family_default, false, text.format_bold)",
+    );
+    assert_eq!(point_form.len(), 1, "{point_form:?}");
+    let table_cell = diagnostic_messages(
+        "t = table.new(position.top_left, 1, 1)\n\
+         table.cell(t, 0, 0, \"x\", 0, 0, color.white, text.align_center, text.align_center, size.normal, color.black, \"tip\", font.family_default, text.format_bold)",
+    );
+    assert_eq!(table_cell.len(), 1, "{table_cell:?}");
+    let plot = diagnostic_messages(
+        "plot(close, \"c\", color.red, 1, plot.style_line, true)\nplot(close, \"d\", color.red, 1, plot.style_line, false)",
+    );
+    assert_eq!(plot.len(), 2, "trackprice is ignored either way: {plot:?}");
+}
+
+#[test]
+fn an_ignored_setter_is_warned_about_when_called_as_a_method() {
+    let function_form = diagnostic_messages(
+        "l = label.new(0, 1.0, \"x\")\nlabel.set_text_formatting(l, text.format_italic)",
+    );
+    let method_form = diagnostic_messages(
+        "l = label.new(0, 1.0, \"x\")\nl.set_text_formatting(text.format_italic)",
+    );
+    assert_eq!(function_form.len(), 1, "{function_form:?}");
+    assert_eq!(method_form, function_form);
+    let on_a_call = diagnostic_messages(
+        "pick() => label.new(0, 1.0, \"x\")\npick().set_text_formatting(text.format_italic)",
+    );
+    assert_eq!(on_a_call, function_form);
+    let table_method = diagnostic_messages(
+        "t = table.new(position.top_left, 1, 1)\nt.cell_set_text_formatting(0, 0, text.format_bold)",
+    );
+    assert_eq!(table_method.len(), 1, "{table_method:?}");
+    // What is drawn, and a method the script declares itself, is never warned about.
+    let quiet = diagnostic_messages(
+        "l = label.new(0, 1.0, \"x\")\nl.set_text_font_family(font.family_monospace)\n\
+         method set_text_formatting(label this, int style) => this\n\
+         l.set_text_formatting(1)",
+    );
+    assert!(quiet.is_empty(), "{quiet:?}");
 }
 
 #[test]
@@ -2035,10 +2639,10 @@ fn pivot_point_levels_come_back_as_an_array_in_the_documented_order() {
     close_to(&session, "running", (104.0 + 100.0 + 103.0) / 3.0);
 }
 
-#[test]
-fn an_unknown_pivot_type_stops_the_script() {
+/// The error a one-statement script stops with over two bars; panics when it runs.
+fn failure_of(statement: &str) -> String {
     let program = compiler::compile(
-        "//@version=6\nindicator(\"T\")\nlevels = ta.pivot_point_levels(\"Nope\", true)",
+        &format!("//@version=6\nindicator(\"T\")\n{statement}"),
         Limits::default(),
         &NoLibraries,
     );
@@ -2053,9 +2657,40 @@ fn an_unknown_pivot_type_stops_the_script() {
         None,
     );
     let Err(error) = session.evaluate(&bars(2)) else {
-        panic!("an unknown type must fail");
+        panic!("{statement} must fail");
     };
-    assert!(format!("{error:?}").contains("Traditional"), "{error:?}");
+    format!("{error:?}")
+}
+
+#[test]
+fn an_unknown_pivot_type_stops_the_script() {
+    let error = failure_of("levels = ta.pivot_point_levels(\"Nope\", true)");
+    assert!(error.contains("Traditional"), "{error}");
+}
+
+#[test]
+fn a_developing_woodie_pivot_stops_the_script() {
+    // TradingView: "If used together, the indicator will return a runtime error" (RE10128).
+    let error = failure_of("levels = ta.pivot_point_levels(\"Woodie\", bar_index == 1, true)");
+    assert!(
+        error.contains("RE10128") && error.contains("developing"),
+        "{error}"
+    );
+    let other = failure_of("levels = ta.pivot_point_levels(\"Woodie\", true, developing = true)");
+    assert!(other.contains("RE10128"), "{other}");
+}
+
+#[test]
+fn a_woodie_pivot_that_is_not_developing_runs() {
+    let session = run(
+        "levels = ta.pivot_point_levels(\"Woodie\", bar_index == 2)\n\
+         p = array.get(levels, 0)\n\
+         flagged = ta.pivot_point_levels(\"Woodie\", bar_index == 2, false)\n\
+         q = array.get(flagged, 0)",
+        3,
+    );
+    assert_eq!(value(&session, "p"), value(&session, "q"));
+    assert!(matches!(value(&session, "p"), RuntimeValue::Float(_)));
 }
 
 #[test]
@@ -3007,4 +3642,219 @@ fn array_functions_take_the_reference_parameter_names() {
     assert_eq!(value(&session, "third_smallest"), RuntimeValue::Float(5.0));
     assert_eq!(value(&session, "size"), RuntimeValue::Int(5));
     assert!(value(&session, "cov").number().unwrap() < 0.0);
+}
+
+/// `timeframe.change` keeps the open time of the bar each call site last ran on (TradingView,
+/// probe R2): the bars here are a minute apart, so `"5"` opens a new bucket at bars 5, 10 and 15.
+fn changes_counted(body: &str) -> RuntimeValue {
+    let session = run(&format!("var int n = 0\n{body}"), 20);
+    value(&session, "n")
+}
+
+#[test]
+fn timeframe_change_is_false_on_the_first_run_of_a_call_site() {
+    assert_eq!(
+        changes_counted("n += timeframe.change(\"5\") ? 1 : 0"),
+        RuntimeValue::Int(3),
+        "bars 5, 10 and 15; bar 0 has no earlier call to compare with"
+    );
+}
+
+#[test]
+fn timeframe_change_in_a_branch_compares_with_the_last_bar_the_branch_ran_on() {
+    // The branch runs on bars 0, 3, 6, ...: bars 6, 12 and 15 open a bucket that its previous run
+    // was not in. Comparing with the chart's previous bar would only see bar 15.
+    assert_eq!(
+        changes_counted("if bar_index % 3 == 0\n    n += timeframe.change(\"5\") ? 1 : 0"),
+        RuntimeValue::Int(3)
+    );
+}
+
+#[test]
+fn timeframe_change_in_the_untaken_side_of_a_ternary_or_and_does_not_run() {
+    assert_eq!(
+        changes_counted("n += (bar_index % 3 == 0 ? timeframe.change(\"5\") : false) ? 1 : 0"),
+        RuntimeValue::Int(3)
+    );
+    assert_eq!(
+        changes_counted("n += (bar_index % 3 == 0 and timeframe.change(\"5\")) ? 1 : 0"),
+        RuntimeValue::Int(3)
+    );
+}
+
+#[test]
+fn timeframe_change_in_a_switch_arm_runs_only_when_the_arm_is_chosen() {
+    assert_eq!(
+        changes_counted(
+            "n += switch\n    bar_index % 3 == 0 => timeframe.change(\"5\") ? 1 : 0\n    => 0"
+        ),
+        RuntimeValue::Int(3)
+    );
+}
+
+#[test]
+fn the_two_sides_of_an_if_else_keep_their_own_previous_bar() {
+    let session = run(
+        "var int even = 0\nvar int odd = 0\n\
+         if bar_index % 2 == 0\n    even += timeframe.change(\"5\") ? 1 : 0\n\
+         else\n    odd += timeframe.change(\"5\") ? 1 : 0",
+        20,
+    );
+    // Even bars: 6, 10 and 16. Odd bars: 5, 11 and 15. A shared previous bar would see 5, 10, 15.
+    assert_eq!(value(&session, "even"), RuntimeValue::Int(3));
+    assert_eq!(value(&session, "odd"), RuntimeValue::Int(3));
+}
+
+#[test]
+fn two_call_sites_on_every_bar_do_not_share_their_previous_bar() {
+    let session = run(
+        "var int a = 0\nvar int b = 0\n\
+         a += timeframe.change(\"5\") ? 1 : 0\nb += timeframe.change(\"5\") ? 1 : 0",
+        20,
+    );
+    assert_eq!(value(&session, "a"), RuntimeValue::Int(3));
+    assert_eq!(value(&session, "b"), RuntimeValue::Int(3));
+}
+
+#[test]
+fn a_function_calling_timeframe_change_has_one_previous_bar_per_calling_site() {
+    let session = run(
+        "var int even = 0\nvar int odd = 0\n\
+         changed(tf) => timeframe.change(tf)\n\
+         if bar_index % 2 == 0\n    even += changed(\"5\") ? 1 : 0\n\
+         else\n    odd += changed(\"5\") ? 1 : 0",
+        20,
+    );
+    assert_eq!(value(&session, "even"), RuntimeValue::Int(3));
+    assert_eq!(value(&session, "odd"), RuntimeValue::Int(3));
+}
+
+#[test]
+fn a_timeframe_change_in_a_loop_compares_every_run_with_the_previous_bar() {
+    // TradingView, probe R2: 39 = 13 days x 3 iterations. The runs of one bar share the bar the
+    // site ran on before it, so every iteration of a bar that opens a bucket reads true.
+    assert_eq!(
+        changes_counted("for i = 0 to 2\n    n += timeframe.change(\"5\") ? 1 : 0"),
+        RuntimeValue::Int(9)
+    );
+}
+
+/// TradingView keeps the opening time of the period the previous run fell in, by that run's own
+/// timeframe, and compares it with this run's (probes R6, R8): bars are a minute apart here.
+#[test]
+fn a_timeframe_that_changes_between_runs_compares_the_periods_each_run_found() {
+    // Even bars name 5-minute periods, odd bars 10-minute ones. The periods differ at bars 6 to 10
+    // and 16 to 19; comparing the previous bar under the current timeframe would count two.
+    assert_eq!(
+        changes_counted("n += timeframe.change(bar_index % 2 == 0 ? \"5\" : \"10\") ? 1 : 0"),
+        RuntimeValue::Int(9)
+    );
+}
+
+#[test]
+fn the_runs_of_a_bar_compare_with_what_the_last_run_of_the_previous_bar_found() {
+    // The previous bar's last run named a 10-minute period, which both runs of this bar compare with.
+    let session = run(
+        "var int five = 0\nvar int ten = 0\n\
+         for i = 0 to 1\n    changed = timeframe.change(i == 0 ? \"5\" : \"10\")\n    \
+         five += i == 0 and changed ? 1 : 0\n    ten += i == 1 and changed ? 1 : 0",
+        20,
+    );
+    assert_eq!(
+        value(&session, "five"),
+        RuntimeValue::Int(11),
+        "bars 5-10 and 15-19"
+    );
+    assert_eq!(value(&session, "ten"), RuntimeValue::Int(1), "bar 10");
+}
+
+#[test]
+fn an_empty_timeframe_is_the_charts_own() {
+    // TradingView, probe R8: `""` changes on every bar after the first run.
+    assert_eq!(
+        changes_counted("n += timeframe.change(\"\") ? 1 : 0"),
+        RuntimeValue::Int(19)
+    );
+}
+
+/// `body` over the regular-session 30-minute bars of 9, 10 and 11 November 2026 on a US stock.
+fn run_on_a_stock(body: &str) -> Session {
+    // 9 Nov 2026 14:30 UTC, the New York open.
+    let open = crate::pine::time::calendar::make(2026, 11, 9, 14, 30, 0, 0).unwrap();
+    run_over_sessions(open, &[0, 1, 2], body)
+}
+
+/// `body` over the 13 regular-session 30-minute bars of each of `days`, counted from the one whose
+/// session opens at `open`.
+fn run_over_sessions(open: i64, days: &[i64], body: &str) -> Session {
+    const MINUTE_MS: i64 = 60_000;
+    let data: Vec<Kline> = days
+        .iter()
+        .flat_map(|day| {
+            (0..13).map(move |bar| open + day * 1_440 * MINUTE_MS + bar * 30 * MINUTE_MS)
+        })
+        .zip(bars(13 * days.len()))
+        .map(|(open_time, bar)| Kline {
+            open_time,
+            close_time: open_time + 30 * MINUTE_MS,
+            ..bar
+        })
+        .collect();
+    let source = format!("//@version=6\nindicator(\"T\")\n{body}");
+    let program = compiler::compile(&source, Limits::default(), &NoLibraries);
+    assert!(program.is_valid(), "{:?}", program.diagnostics);
+    let symbol = SymbolInfo {
+        kind: "stock".to_owned(),
+        grid: crate::model::market::bucket::Grid::UsEquities,
+        ..SymbolInfo::default()
+    };
+    let mut session = Session::new(
+        program,
+        HashMap::new(),
+        Limits::default(),
+        None,
+        symbol,
+        None,
+        None,
+    );
+    session.fixed_bar_seconds = Some(1_800.0);
+    session.evaluate(&data).expect("runs");
+    session
+}
+
+#[test]
+fn a_stocks_four_hour_periods_are_its_sessions() {
+    // 09:30 and 13:30 New York open a period each day, not the UTC clock's four hours (TradingView,
+    // probe R9: 35 over eighteen sessions).
+    let session = run_on_a_stock("var int n = 0\nn += timeframe.change(\"240\") ? 1 : 0");
+    assert_eq!(value(&session, "n"), RuntimeValue::Int(5));
+}
+
+#[test]
+fn a_stocks_day_opens_with_its_session() {
+    // The day and the session's first four hours both open at 09:30, so a call that names the day
+    // before noon and four hours after changes only at 13:30 and at the next open (probe R9).
+    let session = run_on_a_stock(
+        "var int n = 0\n\
+         n += timeframe.change(hour(time, \"America/New_York\") < 12 ? \"D\" : \"240\") ? 1 : 0",
+    );
+    assert_eq!(value(&session, "n"), RuntimeValue::Int(5));
+}
+
+#[test]
+fn after_a_holiday_a_stocks_week_begins_with_the_first_day_that_trades() {
+    // Monday 31 August to Friday 4 September 2026, then Tuesday 8 and Wednesday 9: the 7th is Labor
+    // Day. The call names the day before noon and the week after, and is counted from the 8th. On
+    // the 8th both periods open with that day's first bar, so noon is no change (TradingView,
+    // probe Q2).
+    let open = crate::pine::time::calendar::make(2026, 8, 31, 13, 30, 0, 0).unwrap();
+    let session = run_over_sessions(
+        open,
+        &[0, 1, 2, 3, 4, 8, 9],
+        "var int n = 0\n\
+         changed = timeframe.change(hour(time, \"America/New_York\") < 12 ? \"D\" : \"W\")\n\
+         n += dayofmonth >= 8 and month == 9 and changed ? 1 : 0",
+    );
+    // The open of the 8th, the open of the 9th and noon of the 9th.
+    assert_eq!(value(&session, "n"), RuntimeValue::Int(3));
 }

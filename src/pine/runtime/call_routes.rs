@@ -9,8 +9,8 @@ use super::value::RuntimeValue;
 use crate::pine::syntax::ast::{Argument, Route};
 use crate::pine::syntax::token::{Diagnostic, DiagnosticCategory, SourceRange};
 use crate::pine::{
-    builtins::alert, builtins::math, builtins::strings, builtins::ta, outputs::drawings,
-    outputs::visuals, strategy::builtins,
+    builtins::alert, builtins::market_values, builtins::math, builtins::strings, builtins::ta,
+    outputs::drawings, outputs::visuals, strategy::builtins,
 };
 
 impl Session {
@@ -32,7 +32,7 @@ impl Session {
             "{name} is routed to a family that does not own it"
         );
         match route {
-            Route::Scalar => self.scalar_call(name, arguments, range, context),
+            Route::Scalar => self.scalar_call(name, arguments, site, range, context),
             Route::Collection => self.collection_call(name, arguments, range, context),
             Route::Math => self.math_call(name, arguments, context).map(Some),
             Route::Strings => self.strings_call(name, arguments, range, context).map(Some),
@@ -243,11 +243,67 @@ impl Session {
         range: SourceRange,
         context: &mut RuntimeContext,
     ) -> Result<RuntimeValue, Diagnostic> {
-        if matches!(name, "ta.sar" | "ta.supertrend") {
-            let values = self.eval_all(arguments, context)?;
+        if name == "ta.macd" {
+            let bound = self.bind_named(
+                arguments,
+                &["source", "fastlen", "slowlen", "siglen"],
+                context,
+            )?;
+            let source = bound.get("source").cloned().unwrap_or(RuntimeValue::Na);
+            let [fast, slow, signal] = ta::MACD_DEFAULTS;
+            let length = |parameter: &str, default: i64| {
+                bound
+                    .get(parameter)
+                    .and_then(RuntimeValue::int_value)
+                    .unwrap_or(default)
+            };
+            let (fast, slow, signal) = (
+                length("fastlen", fast),
+                length("slowlen", slow),
+                length("siglen", signal),
+            );
             let key = self.site_key(site, context);
             let state = self.working.ta_states.entry(key).or_default();
-            return Ok(ta::evaluate_price(name, &values, &context.bar, state));
+            return Ok(ta::evaluate_macd(&source, fast, slow, signal, state));
+        }
+        if matches!(name, "ta.stdev" | "ta.variance") {
+            let bound = self.bind_named(arguments, &["source", "length", "biased"], context)?;
+            let source = bound.get("source").cloned().unwrap_or(RuntimeValue::Na);
+            let length = bound
+                .get("length")
+                .and_then(RuntimeValue::int_value)
+                .unwrap_or(0);
+            let biased = bound
+                .get("biased")
+                .and_then(RuntimeValue::bool)
+                .unwrap_or(true);
+            let key = self.site_key(site, context);
+            let state = self.working.ta_states.entry(key).or_default();
+            return Ok(ta::evaluate_dispersion(
+                name, &source, length, biased, state,
+            ));
+        }
+        if matches!(name, "ta.sar" | "ta.supertrend") {
+            let parameters: &[&'static str] = if name == "ta.sar" {
+                &["start", "inc", "max"]
+            } else {
+                &["factor", "atrPeriod"]
+            };
+            let bound = self.bind_named(arguments, parameters, context)?;
+            let values: Vec<RuntimeValue> = parameters
+                .iter()
+                .map(|parameter| bound.get(parameter).cloned().unwrap_or(RuntimeValue::Na))
+                .collect();
+            let previous_close = market_values::previous_close(&self.working);
+            let key = self.site_key(site, context);
+            let state = self.working.ta_states.entry(key).or_default();
+            return Ok(ta::evaluate_price(
+                name,
+                &values,
+                &context.bar,
+                previous_close,
+                state,
+            ));
         }
         if name == "fixnan" {
             let source = self.arg_value(arguments, 0, Some("source"), context)?;
@@ -256,8 +312,16 @@ impl Session {
             return Ok(ta::evaluate_fixnan(&source, state));
         }
         if name == "ta.tr" {
-            // `ta.tr(handle_na)` reads like the `ta.tr` variable.
-            return Ok(self.market("ta.tr", context).unwrap_or(RuntimeValue::Na));
+            let handle_na = self
+                .arg_value(arguments, 0, Some("handle_na"), context)?
+                .bool()
+                .unwrap_or(false);
+            let range = ta::true_range_checked(
+                &context.bar,
+                market_values::previous_close(&self.working),
+                handle_na,
+            );
+            return Ok(range.map_or(RuntimeValue::Na, RuntimeValue::Float));
         }
         if name == "runtime.error" {
             let message = self.arg_value(arguments, 0, Some("message"), context)?;
@@ -299,11 +363,13 @@ impl Session {
         if name == "ta.dmi" {
             let di = self.arg_value(arguments, 0, Some("diLength"), context)?;
             let smoothing = self.arg_value(arguments, 1, Some("adxSmoothing"), context)?;
+            let previous_close = market_values::previous_close(&self.working);
             let key = self.site_key(site, context);
+            let state = self.working.ta_states.entry(key).or_default();
             return Ok(ta::evaluate_dmi(
-                &mut self.working.ta_states,
-                key,
+                state,
                 &context.bar,
+                previous_close,
                 di.int_value().unwrap_or(0),
                 smoothing.int_value().unwrap_or(0),
             ));
@@ -329,11 +395,13 @@ impl Session {
         }
         if name == "ta.atr" {
             let length = self.arg_value(arguments, 0, Some("length"), context)?;
+            let previous_close = market_values::previous_close(&self.working);
             let key = self.site_key(site, context);
             let state = self.working.ta_states.entry(key).or_default();
             return Ok(ta::evaluate_atr(
                 state,
                 &context.bar,
+                previous_close,
                 length.int_value().unwrap_or(14),
             ));
         }

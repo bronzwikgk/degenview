@@ -7,6 +7,7 @@
 //! Money and sizes are [`Decimal`]: the paper engine works in `f64` and converts at its edge,
 //! rounded to the market's increments, so a number shown here is a number that can be sent.
 
+use crate::i18n::tr_c;
 use degenview_brokers::{Decimal, Side};
 
 use crate::model::broker::venue::TradingVenue;
@@ -31,9 +32,9 @@ impl VenueKind {
     /// The word on the venue's pill.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Simulated => "Simulated",
-            Self::Test => "Test",
-            Self::Live => "Live",
+            Self::Simulated => tr_c!("venue kind", "Simulated"),
+            Self::Test => tr_c!("venue kind", "Test"),
+            Self::Live => tr_c!("venue kind", "Live"),
         }
     }
 }
@@ -83,10 +84,10 @@ pub enum OrderClass {
 impl OrderClass {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Market => "Market",
-            Self::Limit => "Limit",
-            Self::Stop => "Stop",
-            Self::StopLimit => "Stop limit",
+            Self::Market => tr_c!("order type", "Market"),
+            Self::Limit => tr_c!("order type", "Limit"),
+            Self::Stop => tr_c!("order type", "Stop"),
+            Self::StopLimit => tr_c!("order type", "Stop limit"),
         }
     }
 }
@@ -102,10 +103,10 @@ pub enum TimeInForce {
 impl TimeInForce {
     pub fn label(self) -> &'static str {
         match self {
-            Self::GoodTilCancelled => "Good til cancelled",
-            Self::Day => "Day",
-            Self::ImmediateOrCancel => "Immediate or cancel",
-            Self::FillOrKill => "Fill or kill",
+            Self::GoodTilCancelled => tr_c!("order duration", "Good til cancelled"),
+            Self::Day => tr_c!("order duration", "Day"),
+            Self::ImmediateOrCancel => tr_c!("order duration", "Immediate or cancel"),
+            Self::FillOrKill => tr_c!("order duration", "Fill or kill"),
         }
     }
 }
@@ -318,6 +319,8 @@ pub struct OrderRow {
     pub market: String,
     pub side: Side,
     pub kind: String,
+    /// Whether it takes the market's price, so an unfilled one has no `price` of its own.
+    pub market_order: bool,
     /// The limit price, or the stop's when that is all the order has.
     pub price: Option<Decimal>,
     /// The price that sets a stop order off, when the order has both a trigger and a limit.
@@ -443,5 +446,23 @@ mod tests {
         };
         assert_eq!(book.reference(Side::Buy), Some(Decimal::new(101, 0)));
         assert_eq!(book.reference(Side::Sell), Some(Decimal::new(99, 0)));
+    }
+
+    #[test]
+    fn venue_and_order_words_follow_the_language() {
+        use crate::i18n::{Locale, with_locale};
+        for kind in [VenueKind::Simulated, VenueKind::Test, VenueKind::Live] {
+            let english = kind.label();
+            assert_ne!(with_locale(Locale::PSEUDO, || kind.label()), english);
+        }
+        for class in [
+            OrderClass::Market,
+            OrderClass::Limit,
+            OrderClass::Stop,
+            OrderClass::StopLimit,
+        ] {
+            let english = class.label();
+            assert_ne!(with_locale(Locale::PSEUDO, || class.label()), english);
+        }
     }
 }

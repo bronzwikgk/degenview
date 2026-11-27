@@ -10,6 +10,9 @@
 - `log.*()` goes to `Session.logs`, never `RuntimeState` (rollback would discard it). Opt-in
   (`ExecutionController::with_logs`); readers apply `LogBatch`es in order via `LogHistory`. Limits in
   `pine::logs`; read [Pine Logs](../pine-logs.md) before changing them.
+- `ta.tr`, `ta.atr`, `ta.kc`, `ta.kcw`, `ta.dmi` and `ta.supertrend` are checked against TradingView's
+  own logs; what still differs and how to measure more is in
+  [`ta.*` against TradingView](../pine-ta-parity.md). Read it before changing them.
 - Debugger (`pine/debug/`, [Pine debugger](../pine-debugger.md)) is opt-in: `Session::debug` is
   `None` unless `attach_debugger` ran; hooks (statement loop, `invoke`, `execute_bar`,
   `request.security` evaluator) test it and call `#[cold] #[inline(never)]` helpers. Never hook
@@ -36,6 +39,29 @@
 - `request.footprint()` handles are stateless (footprint = bar index; `volume_row` = bar index +
   row); data in `Session::footprints`, outside `RuntimeState` so rollback does not copy it. Read
   [Pine volume footprints](../pine-footprint.md) before changing the algorithm: mostly inferred.
+- `ta.*` and a missing (`na`) source bar, as measured on TradingView (Binance bars, probes P03/P09, and the 120-bar comparison in [`ta.*` against TradingView](../pine-ta-parity.md#a-missing-source-bar)):
+  `ta.ema`, `ta.rma`, `ta.macd` and the legs of `ta.kc`, `ta.tsi` and `ta.rsi` are `extra::Derived`
+  averages: a `na` bar gives `na`, leaves the state alone and the average starts as the mean of the
+  first `length` values that exist. `ta.rsi` is `na` while `ta.change(src)` is (the `na` bar and the one
+  after). `ta.stdev`, `ta.variance`, `ta.median`, `ta.range`, `math.sum` and the stdev of `ta.bb` /
+  `ta.bbw` skip the `na` bar and keep their value there (`last_valid`). `ta.wma` is `na` on the bar and
+  later windows hold the last value before it in its slot. `ta.dev` stays strict (TradingView is,
+  against its own manual). **Measured on TradingView, still
+  strict here** (`na` for `length` bars after a gap, where TradingView carries on): `ta.cmo`,
+  `ta.correlation`, `ta.hma`, `ta.mode`, `ta.vwma`, `ta.mfi`, `ta.percentrank`, `ta.highest`,
+  `ta.lowest`, `ta.highestbars`, `ta.lowestbars`, `ta.rising`, `ta.falling`, `ta.cum`: what each does is
+  in [`ta.*` against TradingView](../pine-ta-parity.md#a-missing-source-bar). Every other `ta.*`
+  function is unmeasured here. Never add a per-bar growing field to
+  `ta::State` for this (cloned on every realtime tick).
+- `ta.*` edge rules measured on TradingView (probes P09-P11): `ta.cmo` is `na` on a window where
+  nothing moved (0/0); `ta.cci` repeats its previous value when the window is flat; `ta.mfi` is 100
+  whenever the down flow is 0 (up flow or not) and, because a missing change counts the source on both
+  sides as the reference code reads it, has its first value on bar `length - 1`; `ta.stoch` repeats the
+  previous raw %K when the source sits exactly on a window with no range (a source 5e-11 off it is `na`) and is
+  `na` when the range is 0 and the source is elsewhere; `ta.percentile_linear_interpolation` and
+  `array.percentile_linear_interpolation` interpolate at the 0-based position `p * n - 0.5` held
+  in `[0, n - 1]` (nearest rank is `ceil(p * n)` and already matched). `ta.wvad` on a bar without a range
+  is `na`: **not measured** on TradingView.
 - Execution-model gaps: [the audit](../reviews/pine-execution-model-audit.md); read it before relying
   on rollback exceptions. Still open: broker orders do not survive a rolled-back tick; runtime errors
   do not halt the script.
@@ -81,6 +107,22 @@
   a rolled-back unconfirmed realtime tick keeps the structure active until the block runs on a
   closing tick (as TradingView documents). Condition evaluated every bar (like `if`) so `ta.*` keeps
   history.
+- Map `for [key, value] in m` uses the map's insertion order and reads each value when its
+  iteration starts. Replacing a value does not change the order; adding or removing a key during
+  direct iteration raises `PINE4039`, including changes through aliases. This follows the documented
+  TradingView restriction on changing a map's size; the exact error timing and visibility of
+  replacement values have not been verified on TradingView. A `map<float, V>` exposes numeric keys
+  as floats, including whole-number keys that share the internal lookup key with an integer.
+- A map made with `map.new<K, V>()` keeps its declared types and refuses a write of any other
+  (`PINE4040` at run time; `PINE3073` when the checker knows the types): `put` and `put_all` widen an
+  int to a float and take `na` as a value, nothing else. A slot declared as a script type or enum is
+  only checked to be an object handle or an enum member; which type it is, is the checker's. A refused
+  `put_all` stores nothing. `map.new<K, V>(...)` takes no arguments (`PINE3072`).
+  Checked on TradingView (2026-11-25): `put`/`put_all` with a wrong key or value type, and
+  `map.new<K, V>(1)`, are compile errors; a `map<string, int>` goes into `put_all` of a
+  `map<string, float>` and into a `map<float, float>` parameter, but a `map<float, float>` does not
+  go into a `map<int, float>`, and a `map<int, float>` cannot be assigned to a `map<float, float>`
+  variable (`Ty::assignable`: a call may widen, an assignment may not).
 - `matrix.*`: `matrix_builtins` (names in `MEMBERS`, offered directly by the editor).
   - Element arithmetic (`sum`, `diff`, `mult`) via `operators::apply` (ints stay ints, `na`
     propagates); float numerics (`pow`, `kron`, linear algebra) convert to
@@ -98,9 +140,46 @@
   editor offers these names. Drawings store bar indexes and `time_anchored`; `set_xloc` re-reads
   coordinates and flips it. Label `yloc` stored with its price, ignored (may be `na`) above/below the
   bar; `PineLayer::label_y` resolves it against the candle, price scale unaffected.
-- `table.cell_set_*` creates a blank cell if undefined (inferred). Numeric text size is
-  `Size::Points(n)` (`font_size` scales TradingView's 14 points to our 12). Undrawable properties
-  (font family, bold/italic) warned via `ignored_features`, never silently dropped.
+- `table.cell_set_*` creates a blank cell if undefined (inferred). `text_font_family`
+  (`font.family_default` / `font.family_monospace`) is stored as `FontFamily` on labels, boxes and
+  cells and drawn through `chart_render::font_id` (egui's monospace face), measured in the same face.
+  Bold/italic are not drawn and are warned via `ignored_features`, never silently dropped.
+- Drawing calls bind through `drawings::parameters(name)` (`parameters.rs`, TradingView's order,
+  handle first; `point_parameters` for the `chart.point` form of `line/label/box.new`): constructors,
+  setters, getters, `copy` and `delete` all take their arguments positionally or by name, in any
+  order. A new drawing function gets its entry there (a test fails for a member without one); never
+  read `args[n]`. `pine::compiler::signatures` is the one lookup of a builtin's parameter names
+  (its table, `ta`, collections, drawings): the editor's signature help and `ignored_features` both
+  read it, so a positional argument (`label.new(…, text.format_bold)`) is warned like a named one.
+  A method-style call (`lbl.set_text_formatting(…)`, also on `f()`) is warned under the builtin the
+  checker resolved it to (`Checked::builtin_methods`, by call site); a receiver of unknown type
+  (an untyped parameter) and a `chart.point` held in a variable (so the point form is not seen)
+  are not.
+- Text sizes are measured on TradingView (a probe of every size, drawn there and here with
+  `gallery_of_a_script`, `ui::chart::card::snapshot_tests`), in `ui::pine::geometry`, never inline.
+  Table and box text (`block_font_size`) is its named size in pixels: 8, 10, 14, 20, 36; a cell is
+  1.68 font sizes high and 0.58 wider than its text (`cell_padding`), a table sits 10 points from
+  the plot's edge. Label text (`label_font_size`) is 7, 9, 12, 18, 24, a bubble 2.1 font sizes high
+  and 1.55 wider than its text (`label_padding`, `label_pointer`): the same names are smaller on a
+  label. A numeric size (`Size::Points(n)`) is `n` for a table or box and `n * 12 / 14` for a label.
+  A `plotshape` label shape (`shape_label`) keeps its text at the normal label size; its bubble and
+  its tip's distance from the bar (11, 23, 38, 56, 75 points) grow with `size`. Measured heights
+  match to a pixel at every size; widths differ by a few percent because the font does.
+  A box's text is clipped to its top and bottom but runs past its sides, as on TradingView (a
+  `size.huge` `0123` is wider than a narrow box).
+  A line's `extend.right` runs past its second point and `extend.left` past its first, so a line
+  written right to left swaps sides and an upright one extends up or down. A linefill is the band
+  between the two lines run on only to the sides both extend (`LineExtend::shared`). Its extended
+  ends lie where each line first leaves the plot enlarged by its own width and height on every
+  side, which shows when the lines run opposite ways. It is drawn as two triangles that meet where
+  its outline crosses itself (`geometry::band_triangles`). Boxes differ: their sides are by
+  position, whichever of `left`/`right` is larger. All measured on TradingView.
+  An extended box (`extend.*`) runs to the plot's edge from any distance, with no border on that
+  side (`geometry::extended_box`), and its text stays placed by `left`/`right`. TradingView does the
+  same once it has loaded those bars; before that it places the text of a box on older bars within
+  the view, which is not copied (probe by scrolling back first).
+  Unmeasured: the text a `plotshape` puts beside a non-label shape (reads the label scale) and the
+  size of `plotchar` glyphs (always 12 points).
 - Hover tooltips (`tooltip=`, `label.set_tooltip`, `table.cell_set_tooltip`):
   `hover_targets_in_order` gives drawn rectangles in paint order across scripts (behind-chart labels,
   other labels, then all tables; filled bubble includes pointer) and must keep sharing
@@ -117,9 +196,51 @@
   `ignored_features::ignored_values` (PINE7004) is empty but kept for the next unsupported constant.
 - `ta.pivot_point_levels`: running period OHLC in `ta::State::pivot` (`ta_extra::PivotPeriod`),
   starting at each anchor bar; levels set at a period's end hold until the next ends; `developing`
-  uses the running period. Classic published formulas (reference lists none); Woodie's uses the
+  uses the running period; Woodie with `developing = true` is a runtime error (`PINE4035`, naming
+  TradingView's RE10128). Classic published formulas (reference lists none); Woodie's uses the
   setting bar's open. Unchecked against TradingView output. `ta.rci` = Spearman
   (Pearson on mid-ranks) x 100.
+- `timeframe.change(tf)` is per call site, like `ta.change` of the period: `ta::State::periods` (in
+  `RuntimeState::ta_states`, key `site_key`) holds where the period found by the bar the site last
+  ran on opens, and the same for the bar before (`ta::previous_period`). A run compares the period
+  its own timeframe finds for the current bar with the one kept from the previous bar, so the
+  timeframe may differ from run to run (`h < 12 ? "D" : "W"` changes whenever the two periods open
+  at different times). It is not the previous bar's time cut by the current timeframe.
+  - The first run of a site is false. A site that a branch, a short-circuit, a `switch` arm or a
+    conditionally called function skips keeps what it found on the last bar it ran on. Two call
+    sites, or one function reached from two sites, never share it; inside `request.security` the
+    state is the request's own. The runs of one bar (a loop) all compare with the previous bar,
+    and what the last run found is what the next bar compares with.
+  - `""` is the running series' own timeframe.
+  - Periods are cut on the grid of the series the call runs on (`Session::request_grid`, else the
+    chart's `symbol.grid`), so a request for a stock counts the same from a crypto chart as from a
+    stock one (probe Q1: `"240"`, `"D"` and a mix over ten sessions, 20, 10 and 20, and Bitcoin's
+    72, 12 and 60, from either chart).
+  - On a 24/7 market a period is named by its bucket's start. On a market with closing hours it is
+    named by the first bar the series has in the bucket (`Session::period_of`, from `series_bars`,
+    which a stock script that calls `timeframe.change` therefore keeps): a day, week or month opens
+    with its first bar, so the day, the week that begins with it and the session's first `"240"`
+    are one period, after a holiday too, without a holiday calendar (probe Q2, AAPL 30m around
+    Labor Day and New Year: `"D"` before noon else `"W"` 16 and 20, else `"M"` 21). A history that
+    starts inside a period names it by its first loaded bar. `time("W")` still reads the calendar's
+    Monday where TradingView reads the first traded day (Q2: 8 September against 7).
+  - It does not read the chart's previous bar (`last_committed_open_time` only guards against a
+    repeated bar).
+  - Measured on TradingView over fixed windows. Per call site (probe R2, BINANCE:BTCUSDT 4h,
+    2026-11-01..11-15): global every bar 14; `if` over the window 13; `if inw and hour == 4` 13;
+    `if hour == 4` that also runs before the window 14; each side of an `if`/`else` 13; ternary,
+    `and`, `switch` arm 13; a conditionally called function 13, from two sites 13 and 13; two sites
+    on every bar 13 and 13; `"D"` and `"W"` at `hour == 4` 14 and 2; a three-run loop 39; inside
+    `request.security` 14 and 13. A timeframe that varies (probes R6, R8): `"D"` before noon else
+    `"W"` 25; `"W"` at 04:00 else `"D"` 37; `"240"` and `"D"` on alternate bars 69; through a
+    function 25; in a request 26; a loop naming `"D"`, `"W"`, `"240"` 69, 81, 83; weeks against
+    months to November 31, 88 and 1866; `""` 83 of 84 bars. Stock (probe R9, NASDAQ:AAPL 30m,
+    18 sessions): `"D"` 17, `"240"` 35, `"D"` before noon else `"240"` 35, `"240"`/`"60"`
+    alternating 197, `"D"` before noon else `"W"` 31. `""` inside `"D"`, `"W"`, same-timeframe and
+    `"720"` requests (Q3) 14, 2, 84 and 28. DegenView gives the same values on the same bar times
+    (`"2W"` on AAPL 1D needs the yearly week anchor of `model::market::bucket`). Not measured: a
+    stock's `""`. `ta.*` in a `for` loop still pushes one history entry per run (audit items 20/21),
+    which `timeframe.change` does not.
 - `session.*` reads `trading_session::MarketSessions` by `syminfo.type`: crypto 24x7 UTC (session =
   UTC day); `stock` New York 09:30-16:00 weekdays, pre- from 04:00, post- to 20:00. Charts show the
   regular session, so `isfirstbar`/`islastbar` equal their `_regular` forms; a bar of a day or more
@@ -131,6 +252,22 @@
   for alert subscriptions). `timeframe.main_period` uses `Session::chart_bar_seconds`, set by the
   security evaluator while `bar_seconds` is the requested timeframe's. `weekofyear`: Sunday–Saturday,
   week 1 holds January 1 (inferred; reference only says "week number of the year").
+- The chart's bar length (`timeframe.in_seconds()`, the window of a bar's intrabars) is told, not read off
+  the gap between bars: a bucket cut short by midnight (the last of a `59s` day lasts 24 s) or a
+  session's first bar after a night would give a length the chart does not have. The hosts pass the
+  timeframe the chart is set to (`ExecutionController::with_timeframe_seconds`, `time::bucket::seconds_of`,
+  Pine's 30-day month); a price-based chart's candle length (`with_bar_seconds`, which also turns the
+  footprint's intrabars off) comes first; only a caller that passes neither (tests) infers the length.
+  `bar_seconds` is a length (`timeframe.in_seconds()`, comparisons between timeframes), never an extent: where a
+  time-based bar ends is its own close (`Session::bar_end`: `close_time + 1`), which `time_close`, a bar's
+  intrabar window and the completion of a higher-timeframe bar all use. Pine's month is 30 days and a real one
+  has up to 31, and a `59s` day ends in a 24 s bucket. A price-based chart's bars have no close of their own, so
+  they use the length, a month, quarter or year the calendar's (`bucket::close_time`).
+  What the provider could not give for a series (`Session::security_series`, `SeriesAnswer`) is only how things
+  stood: it is asked for again after `security_retry_after` (15 s) and at once after a rebuild. What it did give
+  (even an empty list) is kept for the run, the bars of one history load, and not beyond: a rebuild
+  (`Session::reset`) asks again, since the chart it answered for may have grown or a live candle moved on (the
+  host's own cache answers a repeat of the same span cheaply).
 - `strategy.*` statistics: `strategy_builtins::statistic`, computed from the broker per read (trade
   lists) except equity extremes, kept by `Broker` as bars arrive (`EquityExtremes`, rolled back with
   state) and merged with the running bar. Losses negative in averages (`avg_losing_trade`), positive
@@ -237,6 +374,112 @@ functions and statements change), `reads.rs`, `locate.rs` (the blocks around a r
 - **Alerts.** `alert()` does nothing while a request runs (`security_depth > 0`: a slice, or a
   function the expression calls): only the chart's own run fires alerts, and the once-per-bar ledger
   stays its own.
+- **Request context.** The site's state starts at `bar_index` −1 (`RuntimeState::before_first_bar`),
+  so a request's first candle is bar 0 and `barstate.isfirst` is true on it. `barstate.*` in a request
+  follow the chart bar the call runs for (`ChartBar`). A candle is realtime when the chart bar is and
+  the candle ends after the history did (`Session::history_end`: the end of the chart's last history
+  bar, and with a live bar after it the moment of the load, `Session::now_ms`, which lies inside that
+  bar). A candle that closed before the load is history even inside the live chart bar: of the 15m
+  candles of a live 4h bar only the one forming at the load is realtime (TradingView probe S2,
+  2026-11-24), and a developing candle on a historical bar is history.
+  `islast` belongs to the requested series, not to the chart bar: it is true on the series' final
+  candle on every chart bar that reads it, a `"1D"` request with `lookahead_on` on each chart bar of
+  the day still forming (probes A, R3, R4). A series folded from the chart's bars has it on the
+  candle that holds the chart's last bar's final instant (`ChartBar::last_end`, the end of its bucket:
+  a 5h bar opened at 20:00 ends at midnight); a series the provider holds (finer, foreign) by its last
+  candle (`SeriesEdges`). `islastconfirmedhistory` is the series' last candle that closed by the
+  history's end, whose successor ends after it (folded) or the last in the list that closed by it
+  (provider): `"1D"` on a 4h chart has it on yesterday's day (probe P12), a `"15"` request on the
+  live 4h bar on the candle closed last before the load, and a closed stock's last hourly candle has
+  both (probe S2). So a lower-timeframe request reads no `islastconfirmedhistory` on the chart's last
+  confirmed history bar (probe R4: 15, 60 and 120 read 38, 240 54) and the forming candle is the one
+  with `islast` and `isrealtime`. `barstate.isnew` in a request is true on history and, in real time,
+  on the first tick of the chart bar that opens the candle; a chart bar that starts inside a candle,
+  or a later tick, reads false (`ChartBar::new`; TradingView probe C, 2026-11-21: one true tick per
+  requested candle open, none on a mid-candle chart bar). TradingView fires it one tick after the
+  chart bar that opened the candle (feed latency, not modelled here), and a finer request's own
+  candles open between the chart's ticks: probe R3 (BTCUSDT 5m, 9.6 minutes) read isnew true on 29
+  of 1,373 ticks for `"1"`, about three per candle open, which this runtime cannot show: a series
+  the provider gave is asked for again on a realtime tick only once it is 30 s old
+  (`Session::security_live_refresh`, the host cache's lifetime), so a candle opens in the list up to
+  that long after TradingView shows it. Before that refresh a bar that opened after the load read an
+  empty list for as long as the chart stayed loaded (real window, BTCUSDT 5m with a `"1"` request,
+  14:20: `n = 0`). A refresh the provider fails keeps the candles the run had; history runs never
+  refresh (a rebuild asks again).
+  `barstate.ishistory` in a request is `!isrealtime`, the final incomplete candle included. Probes
+  A and B (2026-11-21) read ishistory 0 and isrealtime 0 there; that did not reproduce. Measured
+  2026-11-23 to 11-26 (flags islast isconfirmed ishistory isrealtime islastconfirmedhistory), the
+  setup of those probes with the market closed (AAPL 1D, `"1M"`, `lookahead_on`, US Thanksgiving)
+  reads `0 1 1 0 1` on Oct 1, 15 and 30 as they did and `1 0 1 0 0` on Nov 2, 10 and 20; the
+  incomplete candle also read ishistory 1 on XETR:SAP, TSE:7203 and ASX:BHP closed, on the history
+  bars of a live BTCUSDT 4h chart and in Bar Replay on BTCUSDT 1D. Not checked: the primary NASDAQ
+  feed and intraday replay (paid plans).
+  `barstate.isconfirmed` in a request is true once the candle closed, and on history also for a
+  developing candle (`lookahead_on`) that closes by the history's end (`ChartBar::loaded_end`): the
+  candle is complete in the data whichever chart bar reads it. The candle still open at the
+  history's end, and one developing in real time, read false (TradingView probes A, B and R1). The
+  same holds for the elements of a finer request: the newest intrabar of a live chart bar is still
+  forming, so it runs as a tick (`ChartBar::has_closed`, no commit) and reads islast + isrealtime and
+  not isconfirmed (probe S4, BTCUSDT 1h, a `"5"` request at 13:11: `38 54 9`, the second tick on; a
+  script that ran through the candle's close keeps the flags it had then, which a fresh load cannot
+  reproduce). A finer request to another symbol takes the same path (`serve_finer_series`), not the
+  higher-timeframe one: the last intrabar stands for the chart bar and the first with `lookahead_on`,
+  on history and on the live bar alike (probe S5: ETHUSDT `"5"` on a BTCUSDT 1h chart reads offset
+  55 / 0 on a history bar and 20 / 0 on the live one at 13:22, like BTCUSDT's own).
+  A stock's buckets are cut on its session, not the UTC day (`bucket::Grid::UsEquities`, see
+  [Market data](market-data.md#timeframes)): `SymbolInfo::grid` is the chart's grid, the provider
+  says another symbol's (`SecurityDataProvider::grid`), and every `time::bucket` helper takes it. A
+  4h candle of AAPL ends at 13:30 and at 16:00 New York, so a request closes the chart bar that ends
+  there, and a day, week or month ends at the close of its last weekday (`Grid::session_end_ms`),
+  not at the next UTC midnight (TradingView probe A8, 2026-11-25). A bucket that stops before the
+  next one opens means a candle's successor is not found from where it ends: use
+  `time::bucket::following_end` (the next bucket that can trade, `Grid::following_end_ms`), as
+  `islastconfirmedhistory` does for a folded series. Asking for the bucket at the candle's own end
+  answers with the same week again, and no stock week or month was ever the last confirmed one
+  (AAPL 1D, 2026-11-26: the completed week and month read it). The differences that remain
+  (extended hours, early closes, holidays, the `time("D")` of a day) are listed in
+  [Market data](market-data.md#timeframes).
+  `gaps_on` puts the value on the chart bar that closes the candle (`SecurityRequest::gaps_on`,
+  `Session::owns_value`), and on the live bar that closes it the developing candle's value; with
+  `lookahead_on` on the bar that opens the candle. Every other bar is `na`, for the chart's own symbol
+  and another alike (probe S6b, BTCUSDT 1h live, a `"120"` request over the last three bars:
+  `-60 / na / -60` and, with `lookahead_on`, `na / 0 / na`; `"60"` reads `0` on the live bar, which
+  is its candle's only chart bar). A finer request ignores `gaps` (probe S6: `"5"` reads the same
+  candles with it as without).
+  `timeframe.change` in a request is per call site of the request's own state, so it is false on
+  the first candle of the series (see the per-site rule above), TradingView-measured.
+  A chart bar completes a higher-timeframe candle when its own end (`ChartBar::end`, the end of its
+  bucket) reaches the candle's, never `open_time` plus the chart's length: a monthly chart is a
+  nominal 30 days, so a 31-day month would never close its quarter or year and the `"3M"` / `"12M"`
+  request would arrive one bar late (TradingView probe R5, BTCUSDT 1M).
+  The chart's bar length is Pine's nominal one for a calendar bar (`bucket::nominal_length`):
+  `Session` reads it off the bars when the app does not state it, and a 31-day month measures
+  2,678,400 s, which made a `"M"` request on a monthly chart look finer than the chart and be served
+  from other candles (real window, BTCUSDT 1M: `"W"` span 102, `"M"` span 33; now 100 and 23, as
+  TradingView).
+  A request finer than the chart reads the last of the chart bar's intrabars, the first with
+  `lookahead_on` (an AAPL 1D chart reads a `"60"` request's 15:30 candle, and 9:30 with it, probe S1);
+  its `timeframe.change("D")` sums to 0 over a window for the last intrabar and to the number of
+  days for the first. A candle belongs to the chart bar its last instant falls in, the bar running
+  from where it opens to where it closes (`Session::bar_end`, `serve_intrabars`): a stock's daily bar opens at 14:30 UTC and
+  its 4h candles are cut at 12, 16 and 20 UTC, so the 12:00 candle that ends at 16:00 belongs to the
+  day it ends in, not to the day before, and a 31-day month holds its last day (probes R2 and R5).
+  On a realtime chart bar the same `lookahead_on` still returns the chart bar's FIRST intrabar, for a
+  bar the script loaded inside and for one that opened while it ran, and `lookahead_off` the latest
+  (probe S3, BTCUSDT 5m, `"1"` request, 2026-11-24); the Pine docs say a realtime bar returns the
+  latest intrabar whatever the setting, TradingView does not.
+  The chart's last bar is read from the data, never estimated with a length: `Session::load_history`
+  takes the live bar's own open (`live_open`, from `ExecutionController::rebuild`), because
+  `last open + 30 days` put `last_bar_time` on March 31 on a monthly chart with a live April bar and
+  made the January-March candle the last one. The provider's range is `[start, end)` and covers up to
+  where the last bar closes, the later of its calendar end (`bucket::bar_end`) and its open plus the
+  chart's length (a stock's :30 hourly bar is off the UTC grid): cut at "October 1 + 30 days" the
+  provider never sent October 31. `time_close` of a month, quarter or year is the calendar's
+  (`bucket::close_time`; TradingView, BTCUSDT 1M: 31 days for October, 28 for February, the next bar
+  opens at the close); other bars keep open + length. `Session::security_series` lives for one run:
+  `reset` clears it, so a reloaded history asks the provider again. Not done: TradingView's
+  `timeframe.in_seconds("M")` is 2,628,003 (3M 7,884,009, 12M 31,536,036, probe T2), the engine's
+  month is 30 days (2,592,000); both sides of every comparison use the same nominal month.
 - **Adding a read-only member.** Add a new array/map/matrix query to `READ_ONLY_MEMBERS`, or a
   slice will treat it as a write and replay more than needed.
 
@@ -258,7 +501,7 @@ functions and statements change), `reads.rs`, `locate.rs` (the blocks around a r
   - Theme and font owned by `host::editor_theme` (saved after a pause, never while Settings
     draws); change through it so all windows repaint. See [Editor themes](../editor-themes.md).
 - Completion never compiles, runs, re-lexes or touches network/storage. Builtins from the symbol
-  catalog, signatures from `pine_studio::editor::signature`: add new builtins to both. `array.*`/`map.*`
+  catalog, signatures from `pine::compiler::signatures`: add new builtins to both. `array.*`/`map.*`
   come from `array_builtins::KNOWN` / `map_builtins::NAMES` (signatures `parameters()`), no editor
   edit needed. List shows `COMPLETION_ROWS` (10) and scrolls to the highlight on ↑/↓;
   `completion_keys` consumes keys before drawing, so set `CompletionView::scroll_to_selected`, don't
@@ -414,7 +657,7 @@ functions and statements change), `reads.rs`, `locate.rs` (the blocks around a r
   every `"ns.member"` literal under `src/pine` in a closed namespace is registered or a known value
   (runtime ⊆ registry).
 - **Closed** namespace (`registry::CLOSED`): unregistered call is `PINE3053` error with "Did you
-  mean". **Value-closed** (`CLOSED_VALUES`): unknown variable read is `PINE3050`. Add a namespace only
+  mean". **Value-closed** (`CLOSED_VALUES`): unknown variable read is `PINE3050`. A builtin *function* read without a call (`plot(ta.sma)`, `x = nz`) is `PINE3050` too, in any namespace, open or closed, unless a value has that name (`ta.tr`, `time`): TradingView calls it an undeclared identifier (`name_check::is_function_read`). Add a namespace only
   when both guards pass and the Pine corpus is unchanged. `request` stays open (own `PINE9003`);
   `syminfo`, `strategy`, `runtime` stay open for values (Pine adds variables; `syminfo.cftc_code`
   failed the corpus). A false error on a working script is worse than a missed typo.
@@ -440,6 +683,57 @@ functions and statements change), `reads.rs`, `locate.rs` (the blocks around a r
     workloads both ways; user methods/types/aliases that must stay on the chain) and
     `PINE_CORPUS_DUAL=1` (every community script both ways). Bench with `tools/pine-bench.sh`:
     `many_ta`, `many_math`, `many_str`, `plots_and_drawings`, `containers`, `map_counting`.
+- **A `[]` on a call in a lazy operand runs the call on every bar** (`call_binding::hoist`, before
+  `bind` and `mark_shadowing`, libraries included). `cond ? ta.sma(close, 3)[1] : na`, the right side of
+  `and`/`or`, the arms of an `if`/`switch` used for a value and a `switch` condition after the first read
+  the value the call has when it runs on every bar (TradingView: P09 S3, P10 C1-C3), while the call
+  without `[]` keeps its own state. The call moves, unchanged and with its `site`, into a synthetic
+  declaration `\u{1}h<n> = <call>` before its statement, and the operand reads `\u{1}h<n>[k]`: the
+  ordinary history of a variable, no new runtime code.
+  - Only a *total* call moves: running it on a bar its branch skips cannot fail or change anything
+    (`Calls::expression`, an exhaustive match over `Expression`: a new variant must be decided). Which
+    builtins are total is `call_binding::total::is_total`, decided by the evaluator, not by its family:
+    `math.*` (not `math.random`, which draws on the generator) and the `ta` table cannot fail because
+    their evaluators return a bare value; the inline and extra `ta` functions and the scalars return a
+    `Result` and are opt-in by name (`total::NAMES`; `runtime.error`, `ta.pivot_point_levels`, `time`
+    and `time_close` raise). A test makes every name of those families be in `NAMES` or `REFUSED`, so a
+    new builtin must be decided; anything unknown, `array.*`, `str.*`, `request.*`, a method or a draw
+    is not total. A user function is total when its body, and the defaults of its parameters (every
+    call that leaves one out evaluates it), only compute with total calls and declarations of its own.
+    A loop is total only when its bounds and step are numeric literals and the step is not zero (a zero
+    step raises); no `while`, `for … in`, field assignment, method or field read, or assignment to a
+    global. A moved call adds its cost to every bar, and a bar has a budget the guard may be keeping the
+    script under (PINE8004, 20 million instructions): a function that costs more than `RUN_AHEAD_WORK`
+    (100k statements run and loop passes, its callees' loops included) stays where it is, however its
+    loops are written, and so does a call whose cost times the passes of the loops around it (a loop
+    whose passes are not known counts as all of them) passes it. A loop counts as known only when it
+    ends: bounds past 2^53, or a step below two gaps between the floats there, can stop the
+    counter (half a gap rounds back to the same float on every other value). What is not
+    counted: how often a function that holds a moved call is itself called. Counting a cost walks each function body once; calls resolved by name (a library's) can make a cycle that is not a recursion, so past `MAX_WALKS` bodies a function costs everything and its calls stay where they are. A script close to the
+    budget can be pushed over it by what does move. A
+    history only at a literal non-negative offset (`close[lag]` raises PINE4006 for a negative `lag` a
+    guard may keep out). A call that reads a name its statement declares stays.
+  - Nothing moves out of a loop inside an arm or a `while` condition.
+  - **Scope**: the script's own statements and the libraries it imports. A lazy `call[]` written
+    directly inside a `request.*` expression is not moved (that expression runs on the requested
+    series, in the request's own state), so it keeps its old reading, `na` on the bars its branch
+    skips; the same expression on the chart is hoisted (`a_lazy_history_directly_inside_a_request_expression_is_not_run_ahead`).
+    A variable the request reads is replayed by its slice, hoisted call included.
+  - `SYNTHETIC` (`syntax::ast`) starts the name; `Statement::is_synthetic` makes the debugger's
+    `hook_before`/`hook_after` skip it and `SourceMap`/`RegionTable` leave it out, so the debugger shows
+    no such variable or stop (it can stop where a moved call fails, which only a resource limit does,
+    and a breakpoint in a function a moved call runs is hit on bars the guard excludes). The profiler times
+    it as the statement it came from, written in the open region (`RegionTable::statement_around`,
+    `ProfileRuntime::enter_run_ahead`), without counting an execution; its time goes into the
+    statement's next execution (an execution of its own when the bar is cut before the statement
+    starts), so Slowest is never below the average. A function is named to the
+    profiler by its declaration (`RuntimeFunction::declared_at`), never by its first body statement,
+    which may be a synthetic one. Its range starts at the call, unique among declarations in
+    `syntax::scopes`.
+  - A hoist inside a block runs when the block does, so the history carries over the bars it did not run
+    (not measured on TradingView).
+  - Not part of the hoist, and still different from Pine: `nz(a, ta.sma(…))` evaluates its second
+    argument only when `a` is `na` (`Session::scalar_call`), where Pine evaluates both.
 - A run-time failure has no profile (`Profiler::finish`), only the failure, also in Problems.
 - Never close a Pine Studio tab or quit over unsaved editor text or retained drafts without the
   `unsaved` flow. Tab close starts `begin_exit(CloseTab)` and cancels close; quit/update restart use

@@ -161,6 +161,9 @@ pub struct SymbolInfo {
     /// How the chart the script runs on is drawn: `chart.is_*` reads this, and a script on a
     /// price-based chart is fed that chart's constructed bars.
     pub chart: crate::model::ChartKind,
+    /// Where the market cuts its buckets: a stock's intraday candles follow its session, so a
+    /// higher timeframe of it closes where the session does.
+    pub grid: crate::model::market::bucket::Grid,
 }
 
 impl Default for SymbolInfo {
@@ -172,6 +175,7 @@ impl Default for SymbolInfo {
             kind: "crypto".to_owned(),
             base_currency: None,
             chart: crate::model::ChartKind::Standard,
+            grid: crate::model::market::bucket::Grid::Utc,
         }
     }
 }
@@ -363,8 +367,8 @@ impl CompiledProgram {
 mod tests {
     use super::*;
     use crate::pine::outputs::{
-        BoxOutput, LabelOutput, LabelStyle, LineExtend, LineOutput, LineStyle, LinefillOutput,
-        PolylineOutput, Size, TableOutput, TablePosition, TextAlign, YLocation,
+        BoxOutput, FontFamily, LabelOutput, LabelStyle, LineExtend, LineOutput, LineStyle,
+        LinefillOutput, PolylineOutput, Size, TableOutput, TablePosition, TextAlign, YLocation,
     };
 
     #[test]
@@ -462,6 +466,7 @@ mod tests {
             text_color: 0,
             style: LabelStyle::LabelDown,
             size: Size::Normal,
+            font_family: FontFamily::Default,
             tooltip: None,
             text_align: TextAlign::Center,
             yloc: YLocation::Price,
@@ -485,6 +490,7 @@ mod tests {
             text: String::new(),
             text_color: 0,
             text_size: Size::Normal,
+            text_font_family: FontFamily::Default,
             text_horizontal_align: TextAlign::Center,
             text_vertical_align: TextAlign::Center,
             time_anchored: false,

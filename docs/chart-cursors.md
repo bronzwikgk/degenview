@@ -22,8 +22,8 @@ an anchor needs the lines and the tags), and Esc or the tile brings it back.
   changes (never per pointer frame). A value this build does not know falls back to Cross and keeps
   the other options. Only a resting cursor (`CursorMode::persists`: Cross, Dot, Arrow) is stored:
   Demonstration and the Eraser are modes of the moment, so a restart (or another Mac) never opens in
-  a mode that marks the chart or deletes. Esc (after Zoom In and an armed tool) puts them down, back
-  to the resting cursor.
+  a mode that marks the chart or deletes. Esc puts them down, back to the resting cursor, after letting go of Zoom In or an armed tool
+  (`DrawingTools::put_down`, which a right-click on the chart also uses).
 - **One crosshair.** `ChartCard::draw_crosshair` is still the only crosshair; it asks the caps which
   of its parts to draw (lines, price and time tags, the box naming the bar). Hover reporting is
   unchanged, so linked charts, replay and compared markets behave as before. Other charts' shared
@@ -37,8 +37,12 @@ an anchor needs the lines and the tags), and Esc or the tile brings it back.
   position, which is a frame behind). Only when the dot hid the pointer on the last frame, only the
   chart the pointer is over, only on the plot (a script pane has no crosshair to mark, so it keeps
   the system pointer). Live only; snapshots never contain it.
-- **Menu.** `ui/workspace/cursor_menu.rs`, opened by a click on the tile (`tool_sidebar::cursor_tile`).
-  Width is measured from the labels (`cursor_menu::width`), never guessed; the picked row is a light
+- **Tile and menu.** `tool_sidebar::cursor_tile` is a `flyout_tile` like the rail's other menu
+  tiles ([Tool strip tiles](drawing-tools.md#tool-strip-tiles)). With a drawing tool or Zoom In in hand a click
+  picks the chosen cursor the tile shows (`SetCursor(chosen_cursor())`, which also puts them down,
+  as Esc does) and opens nothing; with the cursor already in hand (the tile is lit) the same click
+  opens the menu (`ui/workspace/cursor_menu.rs`), and shuts it again. The tile's arrow and Right arrow
+  while the tile has focus open it without picking; a right-click does nothing. Width is measured from the labels (`cursor_menu::width`), never guessed; the picked row is a light
   plate with dark text so it reads in both themes.
 
 ## The Eraser
@@ -184,8 +188,9 @@ cursor between sessions (ours does).
 ## Known differences and unverified
 
 - The Dot's size and ring are our design.
-- The tile's click opens the menu; it no longer disarms a drawing tool by itself (picking a cursor,
-  Esc, or arming another tool still does).
+- The tile's click picks the cursor it shows, which puts an armed tool or Zoom In down (a first
+  build opened the menu on every click, so the cursor could not be re-picked with one; that was a
+  regression against the other tiles and is fixed).
 - No pointer ring, ripple or trail: nothing documents them. The fade timings and the colour are ours.
 - The tooltip: TradingView documents the hold-to-show behaviour with a switch in the cursor menu, and
   (Charting Library 3.0) OHLC and change that follow the pointer; the **0.5 s**, the position, what

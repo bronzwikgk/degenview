@@ -267,7 +267,7 @@ fn realtime_ticks_do_not_advance_committed_ta_history() {
                 close: 10.0,
                 ..hourly(0)
             }],
-            true,
+            Some(3_600_000),
             None,
         )
         .unwrap();
@@ -314,6 +314,128 @@ fn realtime_ticks_do_not_advance_committed_ta_history() {
 }
 
 #[test]
+fn a_live_bar_with_no_history_before_it_is_the_chart_s_first_and_last_bar() {
+    let program = crate::pine::compiler::compile(
+        "//@version=6\nindicator(\"T\")\nplot(close)",
+        Limits::default(),
+        &crate::pine::compiler::NoLibraries,
+    );
+    let mut session = Session::new(
+        program,
+        HashMap::new(),
+        Limits::default(),
+        None,
+        SymbolInfo::default(),
+        None,
+        None,
+    );
+    session.load_history(&[], Some(7_200_000), None).unwrap();
+    assert_eq!(session.last_bar_time, Some(7_200_000));
+    assert_eq!(session.first_bar_time, Some(7_200_000));
+    assert_eq!(session.last_bar_index, 0);
+}
+
+#[test]
+fn timeframe_change_rolls_back_with_a_realtime_tick() {
+    let program = crate::pine::compiler::compile(
+        "//@version=6\nindicator(\"T\")\nplot(timeframe.change(\"120\") ? 1 : 0)",
+        Limits::default(),
+        &crate::pine::compiler::NoLibraries,
+    );
+    let mut session = Session::new(
+        program,
+        HashMap::new(),
+        Limits::default(),
+        None,
+        SymbolInfo::default(),
+        None,
+        None,
+    );
+    session
+        .load_history(&[hourly(0), hourly(3_600_000)], Some(7_200_000), None)
+        .unwrap();
+    let last_plotted = |session: &mut Session, hour: i64, phase: BarPhase| {
+        session
+            .execute(
+                BarEvent {
+                    candle: hourly(hour * 3_600_000),
+                    phase,
+                },
+                true,
+                None,
+            )
+            .unwrap();
+        session.output().plots[0].values.last().copied().flatten()
+    };
+    // Hour 2 opens a new two-hour bucket, on every tick and on the close.
+    for phase in [
+        BarPhase::RealtimeTick { is_new: true },
+        BarPhase::RealtimeTick { is_new: false },
+        BarPhase::RealtimeClose { is_new: false },
+    ] {
+        assert_eq!(last_plotted(&mut session, 2, phase), Some(1.0));
+    }
+    // Hour 3 shares it: the call compares with hour 2, the bar the closed tick committed.
+    assert_eq!(
+        last_plotted(&mut session, 3, BarPhase::RealtimeTick { is_new: true }),
+        Some(0.0)
+    );
+}
+
+#[test]
+fn timeframe_change_ignores_a_call_only_an_unconfirmed_tick_made() {
+    // The call runs on every bar but the close of hour 2. Hour 2's tick sees a new two-hour bucket
+    // against hour 1, the last committed call, and is thrown away with the tick: hour 3 compares
+    // with hour 1 again (a new bucket), not with the tick's hour 2 (the same one).
+    let program = crate::pine::compiler::compile(
+        "//@version=6\nindicator(\"T\")\n\
+         skipped = barstate.isconfirmed and hour == 2\n\
+         plot((skipped ? false : timeframe.change(\"120\")) ? 1 : 0)",
+        Limits::default(),
+        &crate::pine::compiler::NoLibraries,
+    );
+    let mut session = Session::new(
+        program,
+        HashMap::new(),
+        Limits::default(),
+        None,
+        SymbolInfo::default(),
+        None,
+        None,
+    );
+    session
+        .load_history(&[hourly(0), hourly(3_600_000)], Some(7_200_000), None)
+        .unwrap();
+    let last_plotted = |session: &mut Session, hour: i64, phase: BarPhase| {
+        session
+            .execute(
+                BarEvent {
+                    candle: hourly(hour * 3_600_000),
+                    phase,
+                },
+                true,
+                None,
+            )
+            .unwrap();
+        session.output().plots[0].values.last().copied().flatten()
+    };
+    assert_eq!(
+        last_plotted(&mut session, 2, BarPhase::RealtimeTick { is_new: true }),
+        Some(1.0)
+    );
+    assert_eq!(
+        last_plotted(&mut session, 2, BarPhase::RealtimeClose { is_new: false }),
+        Some(0.0),
+        "the close skips the call"
+    );
+    assert_eq!(
+        last_plotted(&mut session, 3, BarPhase::RealtimeTick { is_new: true }),
+        Some(1.0),
+        "compared with hour 1, the last bar the call was committed on"
+    );
+}
+
+#[test]
 fn once_stays_active_through_realtime_ticks_and_finishes_when_the_bar_closes() {
     let program = crate::pine::compiler::compile(
         "//@version=6\nindicator(\"T\")\nvarip int runs = 0\n\
@@ -330,7 +452,9 @@ fn once_stays_active_through_realtime_ticks_and_finishes_when_the_bar_closes() {
         None,
         None,
     );
-    session.load_history(&[hourly(0)], true, None).unwrap();
+    session
+        .load_history(&[hourly(0)], Some(3_600_000), None)
+        .unwrap();
     let runs_after = |session: &mut Session, phase: BarPhase, open_time: i64| {
         session
             .execute(
@@ -443,4 +567,81 @@ fn strategy_readings_follow_the_broker_and_keep_a_history() {
     assert!(matches!(variable("size"), Some(RuntimeValue::Float(size)) if size > 0.0));
     assert!(matches!(variable("before"), Some(RuntimeValue::Float(size)) if size > 0.0));
     assert!(matches!(variable("avg"), Some(RuntimeValue::Float(_))));
+}
+
+#[test]
+fn timeframe_change_with_a_varying_timeframe_rolls_back_with_realtime_ticks() {
+    // The live bar names an hour or two by its own close, which moves between ticks: every tick
+    // compares with what the last committed bar found, never with an earlier tick of its own bar.
+    let program = crate::pine::compiler::compile(
+        "//@version=6\nindicator(\"T\")\nplot(timeframe.change(close > 10 ? \"60\" : \"120\") ? 1 : 0)",
+        Limits::default(),
+        &crate::pine::compiler::NoLibraries,
+    );
+    let mut session = Session::new(
+        program,
+        HashMap::new(),
+        Limits::default(),
+        None,
+        SymbolInfo::default(),
+        None,
+        None,
+    );
+    let priced = |hour: i64, close: f64| Kline {
+        close,
+        ..hourly(hour * 3_600_000)
+    };
+    // Hour 2 commits the two-hour period that opens at hour 2 (close below ten).
+    session
+        .load_history(&[priced(1, 5.0), priced(2, 5.0)], Some(3 * 3_600_000), None)
+        .unwrap();
+    let run = |session: &mut Session, hour: i64, close: f64, phase: BarPhase| {
+        session
+            .execute(
+                BarEvent {
+                    candle: priced(hour, close),
+                    phase,
+                },
+                true,
+                None,
+            )
+            .unwrap();
+        session.output().plots[0].values.last().copied().flatten()
+    };
+    // Hour 3: "120" finds the period hour 2 committed, "60" finds hour 3's own.
+    let tick = BarPhase::RealtimeTick { is_new: false };
+    assert_eq!(
+        run(
+            &mut session,
+            3,
+            5.0,
+            BarPhase::RealtimeTick { is_new: true }
+        ),
+        Some(0.0)
+    );
+    assert_eq!(run(&mut session, 3, 20.0, tick), Some(1.0));
+    assert_eq!(
+        run(&mut session, 3, 5.0, tick),
+        Some(0.0),
+        "the tick before left nothing behind"
+    );
+    assert_eq!(
+        run(
+            &mut session,
+            3,
+            20.0,
+            BarPhase::RealtimeClose { is_new: false }
+        ),
+        Some(1.0)
+    );
+    // Hour 4 compares with hour 3, which closed naming "60": hour 4's two-hour period differs.
+    assert_eq!(
+        run(
+            &mut session,
+            4,
+            5.0,
+            BarPhase::RealtimeTick { is_new: true }
+        ),
+        Some(1.0)
+    );
 }

@@ -6,7 +6,7 @@
 use crate::host::pine::batch::{BatchRun, Finished};
 use crate::model::indicators::catalog::{CatalogEntry, EntryKey};
 use crate::model::pine::bundled;
-use crate::model::{BuiltIn, Kline, bollinger, ema, rsi, supertrend_flips};
+use crate::model::{BuiltIn, Kline, bollinger, ema, supertrend_flips};
 use crate::pine::compiler::program::{SymbolInfo, VisualOutput};
 use crate::pine::outputs::{MarkerLocation, PlotStyle};
 use crate::pine::syntax::token::Diagnostic;
@@ -98,12 +98,6 @@ fn line(values: Vec<Option<f64>>, color: Color32) -> Line {
 pub fn native(kind: BuiltIn) -> Preview {
     let bars = bars();
     match kind {
-        BuiltIn::Rsi => Preview {
-            overlay: false,
-            lines: vec![line(rsi(bars, 14), theme::RSI)],
-            levels: vec![70.0, 30.0],
-            ..Preview::default()
-        },
         BuiltIn::Ema => Preview {
             overlay: true,
             lines: vec![line(ema(bars, 20), theme::EMA)],
@@ -424,7 +418,7 @@ mod tests {
                 kind.menu_title()
             );
         }
-        assert!(!native(BuiltIn::Rsi).overlay && native(BuiltIn::Ema).overlay);
+        assert!(native(BuiltIn::Ema).overlay);
     }
 
     #[test]
@@ -437,8 +431,13 @@ mod tests {
                 &HashMap::new(),
             );
             let preview = pine(&output, failure.as_ref())
-                .unwrap_or_else(|| panic!("{} has no preview", indicator.name));
-            assert_eq!(preview.overlay, indicator.overlay, "{}", indicator.name);
+                .unwrap_or_else(|| panic!("{} has no preview", indicator.name.msgid()));
+            assert_eq!(
+                preview.overlay,
+                indicator.overlay,
+                "{}",
+                indicator.name.msgid()
+            );
             if indicator.id == "williams-fractals" {
                 assert!(!preview.marks.is_empty(), "fractals are marks");
             } else {
@@ -448,7 +447,7 @@ mod tests {
                         .iter()
                         .any(|line| line.values.iter().flatten().count() > 10),
                     "{} drew a line with almost no values",
-                    indicator.name
+                    indicator.name.msgid()
                 );
             }
         }
@@ -459,11 +458,11 @@ mod tests {
         let ctx = egui::Context::default();
         let mut previews = Previews::default();
         let catalog = crate::model::indicators::catalog::all(&[]);
-        let rsi = catalog
+        let ema = catalog
             .iter()
-            .find(|entry| entry.key == EntryKey::Native(BuiltIn::Rsi))
+            .find(|entry| entry.key == EntryKey::Native(BuiltIn::Ema))
             .unwrap();
-        assert!(previews.get(&ctx, rsi).is_some());
+        assert!(previews.get(&ctx, ema).is_some());
         let macd = catalog
             .iter()
             .find(|entry| entry.key == EntryKey::Bundled("macd"))

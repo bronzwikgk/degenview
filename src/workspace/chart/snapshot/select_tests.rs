@@ -32,6 +32,22 @@ pub(super) fn series(count: usize) -> Vec<Kline> {
         .collect()
 }
 
+/// How long a test waits for a snapshot job before it calls it hung. A picture takes seconds in a
+/// debug build with the machine to itself, and these tests share one work queue with every other
+/// test running, so the wait is a time, not a number of frames: a loaded machine runs frames
+/// quickly while the job it waits for is still queued.
+pub(super) const JOB_DEADLINE: std::time::Duration = std::time::Duration::from_secs(180);
+
+/// Calls `step` until it says it is done, pausing a moment between calls, and fails the test with
+/// `what` if the job is still not done after [`JOB_DEADLINE`].
+pub(super) fn wait_until(what: &str, mut step: impl FnMut() -> bool) {
+    let started = std::time::Instant::now();
+    while !step() {
+        assert!(started.elapsed() < JOB_DEADLINE, "{what}");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
 /// A workspace drawn on a window that takes pointer events, one chart per symbol.
 pub(super) struct Rig {
     pub(super) ctx: egui::Context,
@@ -132,7 +148,7 @@ impl Rig {
             workspace.handle_keyboard(ui);
         }
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().inner_margin(egui::Margin::same(10)))
+            .frame(egui::Frame::new())
             .show(ui, |ui| {
                 let window = ui.max_rect();
                 workspace.render_grid(ui, paper, window)
@@ -265,7 +281,8 @@ fn the_charts_are_laid_out_side_by_side_with_room_for_a_selection() {
     let (a, b) = (rig.frame_of(0), rig.frame_of(1));
     assert!(a.width() > 200.0 && a.height() > 200.0, "{a:?}");
     assert!(b.width() > 200.0 && b.height() > 200.0, "{b:?}");
-    assert!(!a.intersects(b));
+    // Side by side: the two share an edge and nothing more.
+    assert!(a.right() <= b.left(), "{a:?} {b:?}");
 }
 
 fn layout(rig: &Rig) -> &LayoutCapture {
@@ -474,7 +491,7 @@ fn picking_select_portion_takes_the_pointer_from_the_tools_and_zoom() {
     assert_eq!(rig.workspace.tools.active_tool(), Tool::Cursor);
 
     let mut rig = Rig::new(&["BTCUSDT"]);
-    rig.workspace.toggle_zoom_in();
+    rig.workspace.arm_zoom_in();
     rig.workspace.begin_portion_selection();
     assert!(rig.selecting());
     assert!(!rig.workspace.tools.is_zoom_armed());
@@ -493,7 +510,7 @@ fn arming_a_tool_or_zoom_in_puts_the_selection_down() {
 
     let mut rig = Rig::new(&["BTCUSDT"]);
     rig.begin();
-    rig.workspace.toggle_zoom_in();
+    rig.workspace.arm_zoom_in();
     rig.frame(Vec::new());
     assert!(!rig.selecting(), "Zoom In");
     assert!(
