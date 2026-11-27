@@ -100,3 +100,14 @@ All changes made by AI agents will be recorded here with timestamps, reasons, an
 - **Location**:
   - `docs/research-runner-spec.md`
   - `docs/research-runner-todo.md`
+
+## Entry 12 - Research Runner Foundation
+- **Timestamp**: 2026-11-27 21:51
+- **Change**: Added a persisted Research tab, Local NSE historical runner, staged lifecycle domain model, configurable date/cost/execution settings, deduplicated Watchlist Universe Sets, per-universe report totals, and an isolated background worker.
+- **Why**: Provide an executable, auditable first implementation for historical multi-watchlist research without blocking chart or screener work.
+- **Location**:
+  - `src/model/research/mod.rs`
+  - `src/store/research.rs`
+  - `src/ui/research.rs`
+  - `src/service/work_queue.rs`
+  - `src/app/tabs.rs`, `src/app/session.rs`, `src/app/mod.rs`
