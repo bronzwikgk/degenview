@@ -1,5 +1,7 @@
 # Research Runner to-do
 
+Implementation map: `docs/research-runner-implementation-plan.md`.
+
 ## Defined scope
 
 - [ ] Add persisted `Research` top-level tab alongside Chart and Portfolio.
