@@ -57,8 +57,52 @@ struct SavedResearch {
     start: String,
     end: String,
     execution: String,
+    #[serde(default = "default_stop_loss")]
+    stop_loss_pct: f64,
+    #[serde(default = "default_target")]
+    target_pct: f64,
+    #[serde(default = "default_max_holding")]
+    max_holding_bars: usize,
+    #[serde(default)]
+    commission_pct: f64,
+    #[serde(default)]
+    slippage_pct: f64,
     #[serde(default)]
     reports: Vec<RunReport>,
+}
+const fn default_stop_loss() -> f64 {
+    5.0
+}
+const fn default_target() -> f64 {
+    10.0
+}
+const fn default_max_holding() -> usize {
+    45
+}
+
+/// Converts an ISO calendar day to UTC midnight without relying on the host locale/timezone.
+fn parse_day(text: &str) -> Result<Option<i64>, String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let mut fields = text.split('-');
+    let year = fields.next().and_then(|value| value.parse::<i64>().ok());
+    let month = fields.next().and_then(|value| value.parse::<i64>().ok());
+    let day = fields.next().and_then(|value| value.parse::<i64>().ok());
+    if fields.next().is_some()
+        || !matches!((year, month, day), (Some(_), Some(1..=12), Some(1..=31)))
+    {
+        return Err("Dates must use YYYY-MM-DD.".into());
+    }
+    let (mut year, month, day) = (year.unwrap(), month.unwrap(), day.unwrap());
+    year -= i64::from(month <= 2);
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let yoe = year - era * 400;
+    let month_offset = if month > 2 { -3 } else { 9 };
+    let doy = (153 * (month + month_offset) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Ok(Some((era * 146_097 + doe - 719_468) * 86_400_000))
 }
 #[derive(Clone, Default, Deserialize, Serialize)]
 struct RunReport {
@@ -83,7 +127,12 @@ impl RunReport {
             .count()
     }
 }
-fn run_local(members: Vec<UniverseMember>, execution: ExecutionModel) -> RunReport {
+fn run_local(
+    members: Vec<UniverseMember>,
+    start_ms: Option<i64>,
+    end_ms: Option<i64>,
+    config: HistoricalConfig,
+) -> RunReport {
     let mut report = RunReport::default();
     for member in members {
         if member.source != "Local" {
@@ -91,17 +140,18 @@ fn run_local(members: Vec<UniverseMember>, execution: ExecutionModel) -> RunRepo
             continue;
         }
         match fetch_klines(DataSource::Local, &member.symbol, Timeframe::DAY_1, 1500) {
-            Ok(candles) if candles.len() > 2 => {
+            Ok(candles) => {
+                let candles: Vec<_> = candles
+                    .into_iter()
+                    .filter(|bar| start_ms.is_none_or(|start| bar.open_time >= start))
+                    .filter(|bar| end_ms.is_none_or(|end| bar.open_time <= end))
+                    .collect();
+                if candles.len() <= 2 {
+                    report.skipped += 1;
+                    continue;
+                }
                 report.scanned += 1;
                 let entries = close_above_previous_high_entries(&candles);
-                let config = HistoricalConfig {
-                    execution,
-                    stop_loss_pct: 5.0,
-                    target_pct: 10.0,
-                    max_holding_bars: 45,
-                    commission_pct: 0.0,
-                    slippage_pct: 0.0,
-                };
                 report
                     .trades
                     .extend(
@@ -114,7 +164,7 @@ fn run_local(members: Vec<UniverseMember>, execution: ExecutionModel) -> RunRepo
                             }),
                     );
             }
-            _ => report.skipped += 1,
+            Err(_) => report.skipped += 1,
         }
     }
     report
@@ -136,6 +186,9 @@ impl ResearchTab {
             loaded: false,
             saved: SavedResearch {
                 execution: "Next bar open".into(),
+                stop_loss_pct: default_stop_loss(),
+                target_pct: default_target(),
+                max_holding_bars: default_max_holding(),
                 ..Default::default()
             },
             notice: None,
@@ -235,10 +288,21 @@ impl ResearchTab {
             }
             Section::HistoricalTest => {
                 ui.horizontal(|ui| {
-                    ui.label("Start");
+                    ui.label("Start (YYYY-MM-DD)");
                     ui.text_edit_singleline(&mut self.saved.start);
-                    ui.label("End");
+                    ui.label("End (YYYY-MM-DD)");
                     ui.text_edit_singleline(&mut self.saved.end);
+                });
+                ui.horizontal(|ui| {
+                    ui.add(egui::DragValue::new(&mut self.saved.stop_loss_pct).suffix("% stop"));
+                    ui.add(egui::DragValue::new(&mut self.saved.target_pct).suffix("% target"));
+                    ui.add(
+                        egui::DragValue::new(&mut self.saved.max_holding_bars).suffix(" bars max"),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.saved.commission_pct).suffix("% commission"),
+                    );
+                    ui.add(egui::DragValue::new(&mut self.saved.slippage_pct).suffix("% slippage"));
                 });
                 egui::ComboBox::from_id_salt("research-execution")
                     .selected_text(&self.saved.execution)
@@ -261,6 +325,24 @@ impl ResearchTab {
                     )
                     .clicked()
                 {
+                    let start = match parse_day(&self.saved.start) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            self.notice = Some(error);
+                            return;
+                        }
+                    };
+                    let end = match parse_day(&self.saved.end) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            self.notice = Some(error);
+                            return;
+                        }
+                    };
+                    if start.zip(end).is_some_and(|(start, end)| start > end) {
+                        self.notice = Some("Start date must not be after end date.".into());
+                        return;
+                    }
                     let names: Vec<String> = self
                         .saved
                         .universe_set
@@ -294,11 +376,18 @@ impl ResearchTab {
                         } else {
                             ExecutionModel::NextBarOpen
                         };
+                        let config = HistoricalConfig {
+                            execution,
+                            stop_loss_pct: self.saved.stop_loss_pct,
+                            target_pct: self.saved.target_pct,
+                            max_holding_bars: self.saved.max_holding_bars,
+                            commission_pct: self.saved.commission_pct,
+                            slippage_pct: self.saved.slippage_pct,
+                        };
                         self.report = None;
-                        self.run = Some(
-                            work_queue::RESEARCH
-                                .start(Some(ui.ctx()), move || run_local(members, execution)),
-                        );
+                        self.run = Some(work_queue::RESEARCH.start(Some(ui.ctx()), move || {
+                            run_local(members, start, end, config)
+                        }));
                     }
                 }
                 if self.run.is_some() {
