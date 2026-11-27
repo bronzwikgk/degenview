@@ -64,6 +64,20 @@ struct RunReport {
     skipped: usize,
     trades: Vec<(String, HistoricalTrade)>,
 }
+impl RunReport {
+    fn net_return(&self) -> f64 {
+        self.trades
+            .iter()
+            .map(|(_, trade)| trade.net_return_pct)
+            .sum()
+    }
+    fn wins(&self) -> usize {
+        self.trades
+            .iter()
+            .filter(|(_, trade)| trade.net_return_pct > 0.0)
+            .count()
+    }
+}
 fn run_local(symbols: Vec<String>, execution: ExecutionModel) -> RunReport {
     let mut report = RunReport::default();
     for symbol in symbols {
@@ -261,11 +275,20 @@ impl ResearchTab {
             }
             Section::Reports => {
                 if let Some(report) = &self.report {
+                    let total = report.trades.len();
+                    let win_rate = if total == 0 {
+                        0.0
+                    } else {
+                        report.wins() as f64 / total as f64 * 100.0
+                    };
                     ui.label(format!(
                         "{} symbols scanned · {} skipped · {} trades",
-                        report.scanned,
-                        report.skipped,
-                        report.trades.len()
+                        report.scanned, report.skipped, total
+                    ));
+                    ui.label(format!(
+                        "Net return (one unit per trade): {:+.2}% · Win rate: {:.1}%",
+                        report.net_return(),
+                        win_rate
                     ));
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         for (symbol, trade) in &report.trades {
