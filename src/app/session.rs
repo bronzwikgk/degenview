@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 pub(super) enum PersistedSpecialTabKind {
     Portfolio,
     Pine,
+    Research,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -183,6 +184,10 @@ fn persisted_session(tabs: &TabState) -> Result<PersistedSession, String> {
                 TabContent::Pine(pine) => PersistedTab::Special(PersistedSpecialTab {
                     id: pine.id(),
                     kind: PersistedSpecialTabKind::Pine,
+                }),
+                TabContent::Research(research) => PersistedTab::Special(PersistedSpecialTab {
+                    id: research.id(),
+                    kind: PersistedSpecialTabKind::Research,
                 }),
             })
         })

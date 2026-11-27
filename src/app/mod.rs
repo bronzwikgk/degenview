@@ -44,6 +44,7 @@ use crate::service::watchlist_quotes::{WatchlistQuoteBook, WatchlistQuoteCoordin
 use crate::store::SharedStore;
 use crate::store::watchlist::WatchlistStore;
 use crate::ui::portfolio::tab::PortfolioTab;
+use crate::ui::research::ResearchTab;
 use crate::workspace::ChartWorkspace;
 use eframe::egui;
 use std::sync::{Arc, Mutex};
@@ -330,6 +331,7 @@ impl DegenViewApp {
         } else {
             let mut has_portfolio = false;
             let mut has_pine = false;
+            let mut has_research = false;
             let tabs = saved_tabs
                 .into_iter()
                 .filter_map(|saved| match saved {
@@ -362,6 +364,15 @@ impl DegenViewApp {
                             store.clone(),
                             editor_themes.clone(),
                         )))))
+                    }
+                    PersistedTab::Special(PersistedSpecialTab {
+                        id,
+                        kind: PersistedSpecialTabKind::Research,
+                    }) if !has_research => {
+                        has_research = true;
+                        Some(TabSlot::new(TabContent::Research(Box::new(
+                            ResearchTab::new(id),
+                        ))))
                     }
                     PersistedTab::Special(_) | PersistedTab::Unknown(_) => None,
                 })

@@ -14,6 +14,7 @@ pub mod portfolio;
 #[cfg(test)]
 pub(crate) mod render_tests;
 pub mod replay;
+pub mod research;
 pub mod settings;
 pub mod shortcut;
 pub mod snapshot_studio;

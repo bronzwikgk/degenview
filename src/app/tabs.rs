@@ -13,6 +13,7 @@ use crate::pine_studio::{ExitReason, PineStudio, PineStudioAction};
 use crate::service::watchlist_quotes::{WatchlistQuoteBook, WatchlistQuoteCoordinator};
 use crate::ui::icons::Icon;
 use crate::ui::portfolio::tab::PortfolioTab;
+use crate::ui::research::ResearchTab;
 use crate::ui::window::tab_bar::TabView;
 use crate::workspace::{ChartWorkspace, WorkspaceAction};
 use eframe::egui;
@@ -23,6 +24,7 @@ pub(super) enum TabContent {
     Chart(Box<ChartWorkspace>),
     Portfolio(Box<PortfolioTab>),
     Pine(Box<PineStudio>),
+    Research(Box<ResearchTab>),
 }
 
 impl TabContent {
@@ -31,6 +33,7 @@ impl TabContent {
             Self::Chart(workspace) => workspace.id(),
             Self::Portfolio(portfolio) => portfolio.id(),
             Self::Pine(pine) => pine.id(),
+            Self::Research(research) => research.id(),
         }
     }
 
@@ -39,6 +42,7 @@ impl TabContent {
             Self::Chart(workspace) => workspace.title(),
             Self::Portfolio(portfolio) => portfolio.title().to_owned(),
             Self::Pine(pine) => pine.title(),
+            Self::Research(research) => research.title().to_owned(),
         }
     }
 
@@ -47,6 +51,7 @@ impl TabContent {
             Self::Chart(_) => Icon::ChartLine,
             Self::Portfolio(_) => Icon::Briefcase,
             Self::Pine(_) => Icon::AngleBrackets,
+            Self::Research(_) => Icon::BarChart,
         }
     }
 }
@@ -198,6 +203,7 @@ pub(super) fn show_tab(
                 }));
             }
         }
+        TabContent::Research(research) => research.ui(ui, &env.store),
     }
 }
 
@@ -592,6 +598,21 @@ impl TabState {
 }
 
 impl DegenViewApp {
+    pub(super) fn open_research(&mut self, ctx: &egui::Context) {
+        if let Some(id) = self
+            .tabs
+            .find(|content| matches!(content, TabContent::Research(_)))
+        {
+            self.tabs.show(ctx, id);
+            return;
+        }
+        let id = self.tabs.allocate_id();
+        self.tabs.register(
+            TabSlot::new(TabContent::Research(Box::new(ResearchTab::new(id)))),
+            None,
+        );
+    }
+
     /// A tab with no chart: it opens on the empty page, as a new Swift tab does.
     pub(super) fn add_tab(&mut self, window: Option<WindowId>) {
         let id = self.tabs.allocate_id();

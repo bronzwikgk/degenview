@@ -25,6 +25,7 @@ pub mod paper;
 pub mod pine;
 pub mod pinned_timeframes;
 pub mod portfolio;
+pub mod research;
 pub mod scripts;
 pub mod sync;
 pub mod watchlist;
