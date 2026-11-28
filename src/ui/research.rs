@@ -34,6 +34,39 @@ enum Section {
     Reports,
     Campaigns,
 }
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+enum ReportView {
+    #[default]
+    Summary,
+    EquityCurve,
+    Trades,
+    Signals,
+    Symbols,
+    Parameters,
+    Diagnostics,
+}
+impl ReportView {
+    const ALL: [Self; 7] = [
+        Self::Summary,
+        Self::EquityCurve,
+        Self::Trades,
+        Self::Signals,
+        Self::Symbols,
+        Self::Parameters,
+        Self::Diagnostics,
+    ];
+    fn label(self) -> &'static str {
+        match self {
+            Self::Summary => "Summary",
+            Self::EquityCurve => "Equity Curve",
+            Self::Trades => "Trades",
+            Self::Signals => "Signals",
+            Self::Symbols => "Symbols",
+            Self::Parameters => "Parameters",
+            Self::Diagnostics => "Diagnostics",
+        }
+    }
+}
 impl Section {
     const ALL: [Self; 5] = [
         Self::Universe,
@@ -429,6 +462,7 @@ fn run_local(
 pub struct ResearchTab {
     id: u64,
     section: Section,
+    report_view: ReportView,
     loaded: bool,
     saved: SavedResearch,
     notice: Option<String>,
@@ -441,6 +475,7 @@ impl ResearchTab {
         Self {
             id,
             section: Section::default(),
+            report_view: ReportView::default(),
             loaded: false,
             saved: SavedResearch {
                 execution: "Next bar open".into(),
@@ -966,6 +1001,46 @@ impl ResearchTab {
                                 ui.label(format!("{} · {}", diagnostic.symbol, diagnostic.reason));
                             }
                         }
+                    });
+                    ui.separator();
+                    ui.horizontal_wrapped(|ui| {
+                        for view in ReportView::ALL {
+                            ui.selectable_value(&mut self.report_view, view, view.label());
+                        }
+                    });
+                    egui::ScrollArea::vertical().show(ui, |ui| match self.report_view {
+                        ReportView::Summary => {
+                            ui.label("Summary is shown above, including combined and per-universe totals.");
+                        }
+                        ReportView::EquityCurve => {
+                            ui.label("Cumulative one-unit ledger in deterministic report order.");
+                            let mut equity = 0.0;
+                            for (index, row) in report.trades.iter().enumerate() {
+                                equity += row.trade.net_return_pct;
+                                ui.label(format!("{} · {} · cumulative {equity:+.2}%", index + 1, row.symbol));
+                            }
+                        }
+                        ReportView::Trades => for row in &report.trades {
+                            ui.label(format!("{} · entry bar {} · exit bar {} · {:.2}% · {:?} · {}", row.symbol, row.trade.entry_bar, row.trade.exit_bar, row.trade.net_return_pct, row.trade.reason, row.universe_labels.join(", ")));
+                        },
+                        ReportView::Signals => for signal in &report.signals {
+                            ui.label(format!("{} · {:?} · {} · {}", signal.symbol, signal.event.kind, signal.event.bar_time, signal.event.reason));
+                        },
+                        ReportView::Symbols => for member in &report.universe_members {
+                            let diagnostic = report.diagnostics.iter().find(|item| item.symbol == member.symbol);
+                            ui.label(format!("{}:{} · {} · {}", member.source, member.symbol, member.universe_labels.join(", "), diagnostic.map_or("processed", |item| item.reason.as_str())));
+                        },
+                        ReportView::Parameters => {
+                            ui.label(format!("Strategy version: {}", report.strategy_version_id));
+                            ui.label(format!("Universe: {} unique · {} frozen members as of {}", report.universe_size, report.universe_members.len(), report.universe_as_of_ms));
+                            ui.label(format!("Date bounds: {:?} to {:?}", report.start_ms, report.end_ms));
+                            if let Some(config) = report.config {
+                                ui.label(format!("Execution {:?} · Stop {:.2}% · Target {:.2}% · Holding {} · Commission {:.3}% · Slippage {:.3}%", config.execution, config.stop_loss_pct, config.target_pct, config.max_holding_bars, config.commission_pct, config.slippage_pct));
+                            }
+                        }
+                        ReportView::Diagnostics => for diagnostic in &report.diagnostics {
+                            ui.label(format!("{} · {}", diagnostic.symbol, diagnostic.reason));
+                        },
                     });
                 } else {
                     ui.label("No completed Research Runner runs yet.");
