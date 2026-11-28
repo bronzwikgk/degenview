@@ -379,6 +379,9 @@ mod tests {
             universe: frozen.clone(),
             status: CampaignStatus::Active,
             submitted_order_ids: Vec::new(),
+            evaluated_signal_keys: Vec::new(),
+            stop_loss_pct: 5.0,
+            target_pct: 13.0,
         };
         assert_eq!(campaign.universe.as_of_ms, 123);
         assert_eq!(campaign.universe.members[0].symbol, "IDEA");
