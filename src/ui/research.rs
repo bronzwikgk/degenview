@@ -296,6 +296,12 @@ impl RunReport {
             .filter(|row| row.trade.same_bar_ambiguous)
             .count()
     }
+    fn exits(&self, reason: crate::model::research::ExitReason) -> usize {
+        self.trades
+            .iter()
+            .filter(|row| row.trade.reason == reason)
+            .count()
+    }
     fn by_universe(&self) -> BTreeMap<&str, (usize, f64)> {
         let mut result = BTreeMap::new();
         for row in &self.trades {
@@ -786,6 +792,13 @@ impl ResearchTab {
                     ui.label(format!(
                         "Same-bar stop/target ambiguity: {} (conservative stop-first fill)",
                         report.same_bar_ambiguities()
+                    ));
+                    ui.label(format!(
+                        "Target: {} · Stop: {} · Timed out: {} · Open at end: {}",
+                        report.exits(crate::model::research::ExitReason::Target),
+                        report.exits(crate::model::research::ExitReason::Stop),
+                        report.exits(crate::model::research::ExitReason::Time),
+                        report.exits(crate::model::research::ExitReason::EndOfData)
                     ));
                     if report.by_universe().len() > 1 {
                         ui.separator();
