@@ -51,6 +51,12 @@ impl Section {
 #[derive(Clone, Default, Deserialize, Serialize)]
 struct SavedResearch {
     universe_set: String,
+    #[serde(default)]
+    screener_query: String,
+    #[serde(default)]
+    screener_snapshot_name: String,
+    #[serde(default)]
+    screener_snapshots: Vec<SavedSnapshot>,
     strategy_name: String,
     context_signal: String,
     context_trigger: String,
@@ -78,6 +84,11 @@ struct SavedResearch {
     reports: Vec<RunReport>,
     #[serde(default)]
     campaigns: Vec<PaperCampaign>,
+}
+#[derive(Clone, Deserialize, Serialize)]
+struct SavedSnapshot {
+    name: String,
+    universe: FrozenUniverse,
 }
 const fn default_stop_loss() -> f64 {
     5.0
@@ -112,6 +123,36 @@ fn parse_day(text: &str) -> Result<Option<i64>, String> {
     let doy = (153 * (month + month_offset) + 2) / 5 + day - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     Ok(Some((era * 146_097 + doe - 719_468) * 86_400_000))
+}
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |value| value.as_millis() as i64)
+}
+fn scan_screener_snapshot(query: String, name: String) -> Result<SavedSnapshot, String> {
+    let expression = crate::model::screener::parse(&query).map_err(|error| error.to_string())?;
+    let symbols =
+        crate::service::market::local_csv::symbols().map_err(|error| error.to_string())?;
+    let bars_needed = crate::model::screener::required_bars(&expression).max(2) as u32;
+    let members = symbols
+        .into_iter()
+        .filter_map(|symbol| {
+            let bars =
+                fetch_klines(DataSource::Local, &symbol, Timeframe::DAY_1, bars_needed).ok()?;
+            crate::model::screener::matches(&expression, &bars).then_some(UniverseMember {
+                source: "Local".into(),
+                symbol,
+                universe_labels: vec![name.clone()],
+            })
+        })
+        .collect();
+    Ok(SavedSnapshot {
+        name,
+        universe: FrozenUniverse {
+            as_of_ms: now_ms(),
+            members,
+        },
+    })
 }
 #[derive(Clone, Default, Deserialize, Serialize)]
 struct RunReport {
@@ -197,6 +238,7 @@ pub struct ResearchTab {
     notice: Option<String>,
     run: Option<Pending<RunReport>>,
     report: Option<RunReport>,
+    snapshot_run: Option<Pending<Result<SavedSnapshot, String>>>,
 }
 impl ResearchTab {
     pub fn new(id: u64) -> Self {
@@ -214,6 +256,7 @@ impl ResearchTab {
             notice: None,
             run: None,
             report: None,
+            snapshot_run: None,
         }
     }
     pub fn id(&self) -> u64 {
@@ -262,6 +305,20 @@ impl ResearchTab {
                 self.run = None;
             }
         }
+        if let Some(run) = &mut self.snapshot_run {
+            if let Some(result) = run.poll() {
+                match result {
+                    Ok(snapshot) => {
+                        self.saved.screener_snapshots.push(snapshot);
+                        self.notice = Some("Saved immutable screener snapshot locally.".into());
+                    }
+                    Err(error) => self.notice = Some(error),
+                }
+            }
+            if !run.is_pending() {
+                self.snapshot_run = None;
+            }
+        }
         match self.section {
             Section::Universe => {
                 ui.label("Universe Set");
@@ -286,6 +343,51 @@ impl ResearchTab {
                             self.saved.universe_set.push('\n');
                         }
                         self.saved.universe_set.push_str(&name);
+                    }
+                }
+                ui.separator();
+                ui.label("New Local NSE screener snapshot");
+                ui.text_edit_singleline(&mut self.saved.screener_snapshot_name)
+                    .hint_text("Snapshot name");
+                ui.text_edit_multiline(&mut self.saved.screener_query)
+                    .hint_text("close > ema(20) AND rsi(14) > 50");
+                if ui
+                    .add_enabled(
+                        self.snapshot_run.is_none(),
+                        egui::Button::new("Run and freeze screener snapshot"),
+                    )
+                    .clicked()
+                {
+                    let name = self.saved.screener_snapshot_name.trim().to_owned();
+                    if name.is_empty() {
+                        self.notice = Some("Name the screener snapshot first.".into());
+                    } else {
+                        let query = self.saved.screener_query.clone();
+                        self.snapshot_run =
+                            Some(work_queue::RESEARCH.start(Some(ui.ctx()), move || {
+                                scan_screener_snapshot(query, name)
+                            }));
+                    }
+                }
+                if self.snapshot_run.is_some() {
+                    ui.spinner();
+                    ui.label("Scanning Local NSE data...");
+                }
+                for snapshot in &self.saved.screener_snapshots {
+                    let label = format!("Snapshot: {}", snapshot.name);
+                    if ui
+                        .button(format!("Add {label} ({})", snapshot.universe.members.len()))
+                        .clicked()
+                        && !self
+                            .saved
+                            .universe_set
+                            .lines()
+                            .any(|line| line.trim() == label)
+                    {
+                        if !self.saved.universe_set.is_empty() {
+                            self.saved.universe_set.push('\n');
+                        }
+                        self.saved.universe_set.push_str(&label);
                     }
                 }
             }
@@ -372,7 +474,7 @@ impl ResearchTab {
                         .filter(|name| !name.is_empty())
                         .map(str::to_owned)
                         .collect();
-                    let sets: Vec<(String, Vec<(String, String)>)> = lock(watchlist)
+                    let mut sets: Vec<(String, Vec<(String, String)>)> = lock(watchlist)
                         .lists()
                         .iter()
                         .filter(|list| names.iter().any(|name| name == &list.name))
@@ -386,6 +488,29 @@ impl ResearchTab {
                             )
                         })
                         .collect();
+                    sets.extend(
+                        self.saved
+                            .screener_snapshots
+                            .iter()
+                            .filter(|snapshot| {
+                                names
+                                    .iter()
+                                    .any(|name| name == &format!("Snapshot: {}", snapshot.name))
+                            })
+                            .map(|snapshot| {
+                                (
+                                    format!("Snapshot: {}", snapshot.name),
+                                    snapshot
+                                        .universe
+                                        .members
+                                        .iter()
+                                        .map(|member| {
+                                            (member.source.clone(), member.symbol.clone())
+                                        })
+                                        .collect(),
+                                )
+                            }),
+                    );
                     let members = merge_universes(sets);
                     if members.is_empty() {
                         self.notice =
@@ -469,7 +594,7 @@ impl ResearchTab {
                                 .filter(|name| !name.is_empty())
                                 .map(str::to_owned)
                                 .collect();
-                            let sets: Vec<(String, Vec<(String, String)>)> = lock(watchlist)
+                            let mut sets: Vec<(String, Vec<(String, String)>)> = lock(watchlist)
                                 .lists()
                                 .iter()
                                 .filter(|list| names.iter().any(|name| name == &list.name))
@@ -487,9 +612,30 @@ impl ResearchTab {
                                     )
                                 })
                                 .collect();
-                            let as_of_ms = SystemTime::now()
-                                .duration_since(UNIX_EPOCH)
-                                .map_or(0, |duration| duration.as_millis() as i64);
+                            sets.extend(
+                                self.saved
+                                    .screener_snapshots
+                                    .iter()
+                                    .filter(|snapshot| {
+                                        names.iter().any(|name| {
+                                            name == &format!("Snapshot: {}", snapshot.name)
+                                        })
+                                    })
+                                    .map(|snapshot| {
+                                        (
+                                            format!("Snapshot: {}", snapshot.name),
+                                            snapshot
+                                                .universe
+                                                .members
+                                                .iter()
+                                                .map(|member| {
+                                                    (member.source.clone(), member.symbol.clone())
+                                                })
+                                                .collect(),
+                                        )
+                                    }),
+                            );
+                            let as_of_ms = now_ms();
                             let universe = FrozenUniverse::from_sets(as_of_ms, sets);
                             if universe.members.is_empty() {
                                 self.notice =
