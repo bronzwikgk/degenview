@@ -829,6 +829,7 @@ impl ResearchTab {
                                     account_id,
                                     universe,
                                     status: CampaignStatus::Active,
+                                    submitted_order_ids: Vec::new(),
                                 });
                                 self.notice =
                                     Some("Frozen paper campaign created and will be saved.".into());

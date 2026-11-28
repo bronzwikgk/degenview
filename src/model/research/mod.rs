@@ -49,6 +49,8 @@ pub struct PaperCampaign {
     pub account_id: u64,
     pub universe: FrozenUniverse,
     pub status: CampaignStatus,
+    #[serde(default)]
+    pub submitted_order_ids: Vec<u64>,
 }
 
 /// Immutable strategy configuration captured by every run and campaign.
@@ -366,6 +368,7 @@ mod tests {
             account_id: 9,
             universe: frozen.clone(),
             status: CampaignStatus::Active,
+            submitted_order_ids: Vec::new(),
         };
         assert_eq!(campaign.universe.as_of_ms, 123);
         assert_eq!(campaign.universe.members[0].symbol, "IDEA");
