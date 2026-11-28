@@ -51,6 +51,32 @@ pub struct PaperCampaign {
     pub status: CampaignStatus,
 }
 
+/// Immutable strategy configuration captured by every run and campaign.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StrategyVersion {
+    pub id: String,
+    pub name: String,
+    pub created_at_ms: i64,
+    pub summary: String,
+    pub context: StageDefinition,
+    pub setup: StageDefinition,
+    pub entry: StageDefinition,
+    pub invalidation: String,
+    pub stop_loss_pct: f64,
+    pub target_pct: f64,
+    pub max_holding_bars: usize,
+    pub commission_pct: f64,
+    pub slippage_pct: f64,
+    pub execution: ExecutionModel,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct StageDefinition {
+    pub signal: String,
+    pub trigger: String,
+    pub confirmation: String,
+}
+
 impl UniverseMember {
     pub fn key(&self) -> String {
         format!("{}:{}", self.source, self.symbol)

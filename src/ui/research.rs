@@ -4,8 +4,8 @@ use crate::host::paper::PaperHost;
 use crate::lock::lock;
 use crate::model::research::{
     CampaignStatus, ExecutionModel, FrozenUniverse, HistoricalConfig, HistoricalTrade,
-    PaperCampaign, UniverseMember, close_above_previous_high_entries, merge_universes,
-    simulate_long,
+    PaperCampaign, StageDefinition, StrategyVersion, UniverseMember,
+    close_above_previous_high_entries, merge_universes, simulate_long,
 };
 use crate::model::{DataSource, Timeframe};
 use crate::service::{
@@ -60,6 +60,10 @@ struct SavedResearch {
     #[serde(default)]
     screener_snapshots: Vec<SavedSnapshot>,
     strategy_name: String,
+    #[serde(default)]
+    strategy_summary: String,
+    #[serde(default)]
+    strategy_versions: Vec<StrategyVersion>,
     context_signal: String,
     context_trigger: String,
     context_confirmation: String,
@@ -422,6 +426,8 @@ impl ResearchTab {
             Section::Strategy => {
                 ui.label("Strategy name");
                 ui.text_edit_singleline(&mut self.saved.strategy_name);
+                ui.label("Plain-language summary");
+                ui.text_edit_multiline(&mut self.saved.strategy_summary);
                 for (name, value) in [
                     ("Context signal", &mut self.saved.context_signal),
                     ("Context trigger", &mut self.saved.context_trigger),
@@ -435,6 +441,51 @@ impl ResearchTab {
                 ] {
                     ui.label(name);
                     ui.text_edit_singleline(value);
+                }
+                if ui.button("Save immutable strategy version").clicked() {
+                    let name = self.saved.strategy_name.trim().to_owned();
+                    if name.is_empty() {
+                        self.notice = Some("Name the strategy first.".into());
+                    } else {
+                        let execution = if self.saved.execution == "Signal close" {
+                            ExecutionModel::SignalClose
+                        } else {
+                            ExecutionModel::NextBarOpen
+                        };
+                        let created_at_ms = now_ms();
+                        self.saved.strategy_versions.push(StrategyVersion {
+                            id: format!("strategy-{created_at_ms}"),
+                            name,
+                            created_at_ms,
+                            summary: self.saved.strategy_summary.clone(),
+                            context: StageDefinition {
+                                signal: self.saved.context_signal.clone(),
+                                trigger: self.saved.context_trigger.clone(),
+                                confirmation: self.saved.context_confirmation.clone(),
+                            },
+                            setup: StageDefinition {
+                                signal: self.saved.setup_signal.clone(),
+                                trigger: self.saved.setup_trigger.clone(),
+                                confirmation: self.saved.setup_confirmation.clone(),
+                            },
+                            entry: StageDefinition {
+                                signal: self.saved.entry_signal.clone(),
+                                trigger: self.saved.entry_trigger.clone(),
+                                confirmation: self.saved.entry_confirmation.clone(),
+                            },
+                            invalidation: "Close below setup range low".into(),
+                            stop_loss_pct: self.saved.stop_loss_pct,
+                            target_pct: self.saved.target_pct,
+                            max_holding_bars: self.saved.max_holding_bars,
+                            commission_pct: self.saved.commission_pct,
+                            slippage_pct: self.saved.slippage_pct,
+                            execution,
+                        });
+                        self.notice = Some("Saved immutable strategy version locally.".into());
+                    }
+                }
+                for version in &self.saved.strategy_versions {
+                    ui.label(format!("{} · {}", version.name, version.id));
                 }
             }
             Section::HistoricalTest => {
