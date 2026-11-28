@@ -111,3 +111,12 @@ All changes made by AI agents will be recorded here with timestamps, reasons, an
   - `src/ui/research.rs`
   - `src/service/work_queue.rs`
   - `src/app/tabs.rs`, `src/app/session.rs`, `src/app/mod.rs`
+
+## Entry 13 - Research Runner Campaign Safeguards
+- **Timestamp**: 2026-11-28 16:30
+- **Change**: Paper campaigns now retain their selected immutable strategy version's stop and target percentages, submit those protections as Paper Host bracket prices, and record each evaluated symbol/bar to prevent duplicate daily orders from repeated manual evaluation.
+- **Why**: A forward paper campaign must not duplicate a known signal and should use the risk settings it was created to test.
+- **Location**:
+  - `src/model/research/mod.rs`
+  - `src/ui/research.rs`
+  - `docs/research-runner-todo.md`
