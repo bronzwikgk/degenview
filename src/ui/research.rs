@@ -919,18 +919,21 @@ impl ResearchTab {
                     }
                 }
                 for index in 0..self.saved.campaigns.len() {
-                    let campaign = &self.saved.campaigns[index];
+                    let (id, strategy_version, status, members, account_id) = {
+                        let campaign = &self.saved.campaigns[index];
+                        (
+                            campaign.id.clone(),
+                            campaign.strategy_version.clone(),
+                            campaign.status,
+                            campaign.universe.members.len(),
+                            campaign.account_id,
+                        )
+                    };
                     ui.label(format!(
                         "{} · {:?} · {} members · account {}",
-                        campaign.strategy_version,
-                        campaign.status,
-                        campaign.universe.members.len(),
-                        campaign.account_id
+                        strategy_version, status, members, account_id
                     ));
-                    if ui
-                        .button(format!("Evaluate campaign now: {}", campaign.id))
-                        .clicked()
-                    {
+                    if ui.button(format!("Evaluate campaign now: {id}")).clicked() {
                         let campaign = &mut self.saved.campaigns[index];
                         match evaluate_campaign(campaign, &mut lock(paper)) {
                             Ok(submitted) => {
@@ -942,10 +945,8 @@ impl ResearchTab {
                             }
                         }
                     }
-                    if campaign.status == CampaignStatus::Active
-                        && ui
-                            .button(format!("Stop campaign: {}", campaign.id))
-                            .clicked()
+                    if status == CampaignStatus::Active
+                        && ui.button(format!("Stop campaign: {id}")).clicked()
                     {
                         self.saved.campaigns[index].status = CampaignStatus::Stopped;
                         self.notice =
