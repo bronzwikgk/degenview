@@ -169,6 +169,14 @@ fn scan_screener_snapshot(query: String, name: String) -> Result<SavedSnapshot, 
 struct RunReport {
     #[serde(default)]
     strategy_version_id: String,
+    #[serde(default)]
+    universe_size: usize,
+    #[serde(default)]
+    start_ms: Option<i64>,
+    #[serde(default)]
+    end_ms: Option<i64>,
+    #[serde(default)]
+    config: Option<HistoricalConfig>,
     scanned: usize,
     skipped: usize,
     trades: Vec<ResearchTrade>,
@@ -237,6 +245,10 @@ fn run_local(
 ) -> RunReport {
     let mut report = RunReport {
         strategy_version_id,
+        universe_size: members.len(),
+        start_ms,
+        end_ms,
+        config: Some(config),
         ..Default::default()
     };
     for member in members {
@@ -671,6 +683,13 @@ impl ResearchTab {
                         report.scanned, report.skipped, total
                     ));
                     ui.label(format!("Strategy version: {}", report.strategy_version_id));
+                    ui.label(format!(
+                        "Universe: {} unique symbols · Date bounds: {:?} to {:?}",
+                        report.universe_size, report.start_ms, report.end_ms
+                    ));
+                    if let Some(config) = report.config {
+                        ui.label(format!("Execution: {:?} · Stop: {:.2}% · Target: {:.2}% · Max holding: {} bars · Cost: {:.3}% + {:.3}%", config.execution, config.stop_loss_pct, config.target_pct, config.max_holding_bars, config.commission_pct, config.slippage_pct));
+                    }
                     ui.label(format!(
                         "Net return (one unit per trade): {:+.2}% · Win rate: {:.1}%",
                         report.net_return(),
