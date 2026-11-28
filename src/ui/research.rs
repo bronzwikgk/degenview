@@ -236,6 +236,10 @@ struct RunReport {
     end_ms: Option<i64>,
     #[serde(default)]
     config: Option<HistoricalConfig>,
+    #[serde(default)]
+    universe_members: Vec<UniverseMember>,
+    #[serde(default)]
+    universe_as_of_ms: i64,
     scanned: usize,
     skipped: usize,
     trades: Vec<ResearchTrade>,
@@ -320,6 +324,7 @@ fn run_local(
     end_ms: Option<i64>,
     config: HistoricalConfig,
     strategy_version_id: String,
+    universe_as_of_ms: i64,
 ) -> RunReport {
     let mut report = RunReport {
         strategy_version_id,
@@ -327,6 +332,8 @@ fn run_local(
         start_ms,
         end_ms,
         config: Some(config),
+        universe_members: members.clone(),
+        universe_as_of_ms,
         ..Default::default()
     };
     for member in members {
@@ -755,9 +762,17 @@ impl ResearchTab {
                             .last()
                             .map(|version| version.id.clone())
                             .unwrap_or_else(|| "unsaved-builder".into());
+                        let universe_as_of_ms = end.unwrap_or_else(now_ms);
                         self.report = None;
                         self.run = Some(work_queue::RESEARCH.start(Some(ui.ctx()), move || {
-                            run_local(members, start, end, config, strategy_version_id)
+                            run_local(
+                                members,
+                                start,
+                                end,
+                                config,
+                                strategy_version_id,
+                                universe_as_of_ms,
+                            )
                         }));
                     }
                 }
@@ -782,6 +797,11 @@ impl ResearchTab {
                     ui.label(format!(
                         "Universe: {} unique symbols · Date bounds: {:?} to {:?}",
                         report.universe_size, report.start_ms, report.end_ms
+                    ));
+                    ui.label(format!(
+                        "Frozen membership: {} symbols as of {}",
+                        report.universe_members.len(),
+                        report.universe_as_of_ms
                     ));
                     if let Some(config) = report.config {
                         ui.label(format!("Execution: {:?} · Stop: {:.2}% · Target: {:.2}% · Max holding: {} bars · Cost: {:.3}% + {:.3}%", config.execution, config.stop_loss_pct, config.target_pct, config.max_holding_bars, config.commission_pct, config.slippage_pct));
