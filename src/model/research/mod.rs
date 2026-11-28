@@ -255,6 +255,8 @@ pub struct HistoricalTrade {
     pub exit: f64,
     pub net_return_pct: f64,
     pub reason: ExitReason,
+    #[serde(default)]
+    pub same_bar_ambiguous: bool,
 }
 
 /// Deterministic long-only OHLC simulator. `entries[i]` is known only at the close of candle i.
@@ -271,6 +273,7 @@ pub fn simulate_long(
         if let Some((entry_bar, entry)) = open {
             let stop = entry * (1.0 - config.stop_loss_pct / 100.0);
             let target = entry * (1.0 + config.target_pct / 100.0);
+            let same_bar_ambiguous = bar.low <= stop && bar.high >= target;
             let outcome = if bar.low <= stop {
                 Some((stop, ExitReason::Stop))
             } else if bar.high >= target {
@@ -290,6 +293,7 @@ pub fn simulate_long(
                     exit,
                     net_return_pct: net,
                     reason,
+                    same_bar_ambiguous,
                 });
                 open = None;
             }
@@ -315,6 +319,7 @@ pub fn simulate_long(
             exit,
             net_return_pct: gross - 2.0 * (config.commission_pct + config.slippage_pct),
             reason: ExitReason::EndOfData,
+            same_bar_ambiguous: false,
         });
     }
     trades

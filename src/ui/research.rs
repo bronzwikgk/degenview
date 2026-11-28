@@ -231,6 +231,12 @@ impl RunReport {
         }
         drawdown
     }
+    fn same_bar_ambiguities(&self) -> usize {
+        self.trades
+            .iter()
+            .filter(|row| row.trade.same_bar_ambiguous)
+            .count()
+    }
     fn by_universe(&self) -> BTreeMap<&str, (usize, f64)> {
         let mut result = BTreeMap::new();
         for row in &self.trades {
@@ -718,6 +724,10 @@ impl ResearchTab {
                     ));
                     let (average_win, average_loss) = report.average_win_loss();
                     ui.label(format!("Average win: {average_win:+.2}% · Average loss: {average_loss:+.2}% · Max drawdown: {:.2}%", report.max_drawdown()));
+                    ui.label(format!(
+                        "Same-bar stop/target ambiguity: {} (conservative stop-first fill)",
+                        report.same_bar_ambiguities()
+                    ));
                     if report.by_universe().len() > 1 {
                         ui.separator();
                         ui.strong("Per source universe");
