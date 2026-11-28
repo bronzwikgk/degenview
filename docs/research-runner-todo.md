@@ -13,7 +13,7 @@ Status: `[x]` verified implemented, `[-]` partially implemented, `[ ]` not imple
 - [-] Add Watchlist, saved query, new query and immutable universe snapshot sources. *(Watchlists, new queries, and immutable snapshots implemented; saved-query source remains pending.)*
 - [x] Add Universe Sets: select multiple Watchlists and/or screener snapshots in one run.
 - [x] Deduplicate identical source-qualified symbols for execution while retaining every universe-membership label in reports.
-- [ ] Save historical universe membership with its as-of date.
+- [x] Save historical universe membership with its as-of date.
 - [ ] Add versioned strategy definitions with Context, Setup, Entry, Invalidation, Stop, Exit and Costs blocks.
 - [ ] Give Context, Setup and Entry separate Signal, Trigger and Confirmation conditions.
 - [ ] Persist the signal, trigger, confirmation and execution timestamps, values and failure reasons for every trade lifecycle.
