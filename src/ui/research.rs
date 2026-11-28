@@ -180,6 +180,13 @@ struct RunReport {
     scanned: usize,
     skipped: usize,
     trades: Vec<ResearchTrade>,
+    #[serde(default)]
+    diagnostics: Vec<SymbolDiagnostic>,
+}
+#[derive(Clone, Deserialize, Serialize)]
+struct SymbolDiagnostic {
+    symbol: String,
+    reason: String,
 }
 #[derive(Clone, Deserialize, Serialize)]
 struct ResearchTrade {
@@ -254,6 +261,10 @@ fn run_local(
     for member in members {
         if member.source != "Local" {
             report.skipped += 1;
+            report.diagnostics.push(SymbolDiagnostic {
+                symbol: member.symbol,
+                reason: "Unsupported data source for daily Local NSE runner".into(),
+            });
             continue;
         }
         match fetch_klines(DataSource::Local, &member.symbol, Timeframe::DAY_1, 1500) {
@@ -265,6 +276,10 @@ fn run_local(
                     .collect();
                 if candles.len() <= 2 {
                     report.skipped += 1;
+                    report.diagnostics.push(SymbolDiagnostic {
+                        symbol: member.symbol,
+                        reason: "Insufficient candles in selected date range".into(),
+                    });
                     continue;
                 }
                 report.scanned += 1;
@@ -281,7 +296,13 @@ fn run_local(
                             }),
                     );
             }
-            Err(_) => report.skipped += 1,
+            Err(error) => {
+                report.skipped += 1;
+                report.diagnostics.push(SymbolDiagnostic {
+                    symbol: member.symbol,
+                    reason: format!("Data load failed: {error}"),
+                });
+            }
         }
     }
     report
@@ -713,6 +734,13 @@ impl ResearchTab {
                                 row.trade.reason,
                                 row.universe_labels.join(", ")
                             ));
+                        }
+                        if !report.diagnostics.is_empty() {
+                            ui.separator();
+                            ui.strong("Diagnostics");
+                            for diagnostic in &report.diagnostics {
+                                ui.label(format!("{} · {}", diagnostic.symbol, diagnostic.reason));
+                            }
                         }
                     });
                 } else {
