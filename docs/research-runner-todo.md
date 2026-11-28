@@ -14,21 +14,21 @@ Status: `[x]` verified implemented, `[-]` partially implemented, `[ ]` not imple
 - [x] Add Universe Sets: select multiple Watchlists and/or screener snapshots in one run.
 - [x] Deduplicate identical source-qualified symbols for execution while retaining every universe-membership label in reports.
 - [x] Save historical universe membership with its as-of date.
-- [ ] Add versioned strategy definitions with Context, Setup, Entry, Invalidation, Stop, Exit and Costs blocks.
-- [ ] Give Context, Setup and Entry separate Signal, Trigger and Confirmation conditions.
+- [-] Add versioned strategy definitions with Context, Setup, Entry, Invalidation, Stop, Exit and Costs blocks. *(Immutable definitions are saved; rule execution remains limited to the built-in daily entry rule.)*
+- [x] Give Context, Setup and Entry separate Signal, Trigger and Confirmation conditions.
 - [ ] Persist the signal, trigger, confirmation and execution timestamps, values and failure reasons for every trade lifecycle.
 - [x] Enforce stage order: no trigger without its signal, no confirmation without its trigger, and no entry fill before entry confirmation.
 - [ ] Implement the REB / Breakout #2 strategy definition with a maximum setup age and opposite-side invalidation.
-- [-] Build daily historical runner with strict as-of-bar data access. *(Daily runner implemented; frozen historical membership remains pending.)*
+- [x] Build daily historical runner with strict as-of-bar data access and frozen universe membership.
 - [ ] Record pivot occurrence date separately from pivot confirmation date.
 - [x] Implement close and next-bar-open execution models.
-- [ ] Define same-bar stop/target precedence and report ambiguous cases.
+- [x] Define conservative same-bar stop/target precedence (stop first) and report ambiguous cases.
 - [ ] Add candidate lifecycle: Candidate, Cancelled, Expired, Entered, Target, Stopped, Timed Out and Open.
 - [ ] Store auditable historical run results and diagnostics; do not suppress data/rule errors.
 - [-] Add report views: Summary, Equity Curve, Trades, Signals, Symbols, Parameters and Diagnostics. *(Summary, trades, per-universe totals, win/loss, and drawdown are implemented; dedicated remaining views pending.)*
 - [x] Show separate reports per source universe and a clearly labelled combined report for a Universe Set.
-- [-] Add forward-only Paper Campaigns from frozen Watchlist/screener snapshots. *(Frozen Watchlist campaigns implemented; evaluation/order hand-off pending.)*
-- [-] Reuse the existing paper engine for forward orders, brackets, commissions, slippage and ledger records. *(Forward campaign evaluation submits auditable market orders through Paper Host; automatic daily scheduling and bracket rules remain pending.)*
+- [-] Add forward-only Paper Campaigns from frozen Watchlist/screener snapshots. *(Frozen campaigns can be manually evaluated; automatic daily scheduling remains pending.)*
+- [-] Reuse the existing paper engine for forward orders, brackets, commissions, slippage and ledger records. *(Manual campaign evaluation submits deduplicated auditable Paper Host market orders with saved stop/target brackets; scheduling and campaign-level cost configuration remain pending.)*
 - [x] Verify the historical runner never sends replay or live quotes to the historical fill model.
 - [-] Test the same strategy on two overlapping universe snapshots and verify independent ledgers, labels and combined totals. *(Deduplication/labels are tested; independent per-universe ledgers remain pending.)*
 

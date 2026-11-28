@@ -42,7 +42,7 @@ pub enum CampaignStatus {
 
 /// A forward-only campaign definition. Historical runners must never create this value or submit
 /// a paper order; a host creates it explicitly after freezing the universe and strategy version.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PaperCampaign {
     pub id: String,
     pub strategy_version: String,
@@ -51,6 +51,15 @@ pub struct PaperCampaign {
     pub status: CampaignStatus,
     #[serde(default)]
     pub submitted_order_ids: Vec<u64>,
+    /// Keys for completed daily entry evaluations.  This prevents a user pressing
+    /// "Evaluate" twice from creating a second order for the same symbol/bar.
+    #[serde(default)]
+    pub evaluated_signal_keys: Vec<String>,
+    /// Risk settings copied from the immutable strategy at campaign creation.
+    #[serde(default)]
+    pub stop_loss_pct: f64,
+    #[serde(default)]
+    pub target_pct: f64,
 }
 
 /// Immutable strategy configuration captured by every run and campaign.

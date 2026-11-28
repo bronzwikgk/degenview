@@ -188,6 +188,10 @@ fn evaluate_campaign(campaign: &mut PaperCampaign, paper: &mut PaperHost) -> Res
             continue;
         }
         let last = bars.last().expect("checked");
+        let signal_key = format!("{}:{}:{}", member.source, member.symbol, last.close_time);
+        if campaign.evaluated_signal_keys.contains(&signal_key) {
+            continue;
+        }
         let instrument = PaperInstrument::chart(&member.symbol, &member.symbol, DataSource::Local);
         paper
             .process_quote(PaperQuote {
@@ -209,8 +213,10 @@ fn evaluate_campaign(campaign: &mut PaperCampaign, paper: &mut PaperHost) -> Res
                 limit_price: None,
                 stop_price: None,
                 time_in_force: PaperTimeInForce::GoodTilCanceled,
-                take_profit: None,
-                stop_loss: None,
+                take_profit: (campaign.target_pct > 0.0)
+                    .then_some(last.close * (1.0 + campaign.target_pct / 100.0)),
+                stop_loss: (campaign.stop_loss_pct > 0.0)
+                    .then_some(last.close * (1.0 - campaign.stop_loss_pct / 100.0)),
             })
             .map_err(|error| error.to_string())?;
         paper
@@ -224,6 +230,7 @@ fn evaluate_campaign(campaign: &mut PaperCampaign, paper: &mut PaperHost) -> Res
             })
             .map_err(|error| error.to_string())?;
         campaign.submitted_order_ids.push(order_id);
+        campaign.evaluated_signal_keys.push(signal_key);
         submitted += 1;
     }
     Ok(submitted)
@@ -924,17 +931,34 @@ impl ResearchTab {
                                 self.notice =
                                     Some("Select a Local NSE Watchlist in Universe first.".into());
                             } else {
+                                let (strategy_version, stop_loss_pct, target_pct) = self
+                                    .saved
+                                    .strategy_versions
+                                    .last()
+                                    .map(|version| {
+                                        (
+                                            version.id.clone(),
+                                            version.stop_loss_pct,
+                                            version.target_pct,
+                                        )
+                                    })
+                                    .unwrap_or_else(|| {
+                                        (
+                                            "unsaved-strategy".into(),
+                                            self.saved.stop_loss_pct,
+                                            self.saved.target_pct,
+                                        )
+                                    });
                                 self.saved.campaigns.push(PaperCampaign {
                                     id: format!("campaign-{as_of_ms}"),
-                                    strategy_version: if self.saved.strategy_name.is_empty() {
-                                        "Unnamed strategy".into()
-                                    } else {
-                                        self.saved.strategy_name.clone()
-                                    },
+                                    strategy_version,
                                     account_id,
                                     universe,
                                     status: CampaignStatus::Active,
                                     submitted_order_ids: Vec::new(),
+                                    evaluated_signal_keys: Vec::new(),
+                                    stop_loss_pct,
+                                    target_pct,
                                 });
                                 self.notice =
                                     Some("Frozen paper campaign created and will be saved.".into());
