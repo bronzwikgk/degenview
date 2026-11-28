@@ -77,6 +77,10 @@ struct SavedResearch {
     entry_signal: String,
     entry_trigger: String,
     entry_confirmation: String,
+    #[serde(default)]
+    invalidation: String,
+    #[serde(default)]
+    exit_rule: String,
     start: String,
     end: String,
     execution: String,
@@ -590,6 +594,10 @@ impl ResearchTab {
                     ui.label(name);
                     ui.text_edit_singleline(value);
                 }
+                ui.label("Invalidation");
+                ui.text_edit_singleline(&mut self.saved.invalidation);
+                ui.label("Exit rule");
+                ui.text_edit_singleline(&mut self.saved.exit_rule);
                 if ui.button("Save immutable strategy version").clicked() {
                     let name = self.saved.strategy_name.trim().to_owned();
                     if name.is_empty() {
@@ -621,7 +629,8 @@ impl ResearchTab {
                                 trigger: self.saved.entry_trigger.clone(),
                                 confirmation: self.saved.entry_confirmation.clone(),
                             },
-                            invalidation: "Close below setup range low".into(),
+                            invalidation: self.saved.invalidation.clone(),
+                            exit_rule: self.saved.exit_rule.clone(),
                             stop_loss_pct: self.saved.stop_loss_pct,
                             target_pct: self.saved.target_pct,
                             max_holding_bars: self.saved.max_holding_bars,

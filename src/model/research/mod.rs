@@ -64,6 +64,7 @@ pub struct StrategyVersion {
     pub setup: StageDefinition,
     pub entry: StageDefinition,
     pub invalidation: String,
+    pub exit_rule: String,
     pub stop_loss_pct: f64,
     pub target_pct: f64,
     pub max_holding_bars: usize,
