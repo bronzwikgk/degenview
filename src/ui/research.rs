@@ -56,6 +56,8 @@ struct SavedResearch {
     #[serde(default)]
     screener_snapshot_name: String,
     #[serde(default)]
+    saved_screener_queries: Vec<SavedQuery>,
+    #[serde(default)]
     screener_snapshots: Vec<SavedSnapshot>,
     strategy_name: String,
     context_signal: String,
@@ -89,6 +91,11 @@ struct SavedResearch {
 struct SavedSnapshot {
     name: String,
     universe: FrozenUniverse,
+}
+#[derive(Clone, Deserialize, Serialize)]
+struct SavedQuery {
+    name: String,
+    query: String,
 }
 const fn default_stop_loss() -> f64 {
     5.0
@@ -351,6 +358,27 @@ impl ResearchTab {
                     .hint_text("Snapshot name");
                 ui.text_edit_multiline(&mut self.saved.screener_query)
                     .hint_text("close > ema(20) AND rsi(14) > 50");
+                if ui.button("Save query").clicked() {
+                    let name = self.saved.screener_snapshot_name.trim().to_owned();
+                    if name.is_empty() {
+                        self.notice = Some("Name the query first.".into());
+                    } else {
+                        self.saved
+                            .saved_screener_queries
+                            .retain(|saved| saved.name != name);
+                        self.saved.saved_screener_queries.push(SavedQuery {
+                            name,
+                            query: self.saved.screener_query.clone(),
+                        });
+                        self.notice = Some("Saved query locally.".into());
+                    }
+                }
+                for saved in self.saved.saved_screener_queries.clone() {
+                    if ui.button(format!("Load query: {}", saved.name)).clicked() {
+                        self.saved.screener_snapshot_name = saved.name;
+                        self.saved.screener_query = saved.query;
+                    }
+                }
                 if ui
                     .add_enabled(
                         self.snapshot_run.is_none(),

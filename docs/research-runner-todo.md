@@ -9,9 +9,9 @@ Status: `[x]` verified implemented, `[-]` partially implemented, `[ ]` not imple
 - [x] Add persisted `Research` top-level tab alongside Chart and Portfolio.
 - [x] Route New Tab **Screener** to Research Runner's Universe section.
 - [x] Keep **Projects** as the development tracker route.
-- [ ] Reuse Local NSE screener query builder and saved-query storage in the Universe section.
-- [ ] Add Watchlist, saved query, new query and immutable universe snapshot sources.
-- [-] Add Universe Sets: select multiple Watchlists and/or screener snapshots in one run. *(Watchlists implemented; screener snapshots pending.)*
+- [-] Reuse Local NSE screener query builder and saved-query storage in the Universe section. *(Research-native query execution and snapshots implemented; saved-query CRUD remains pending.)*
+- [-] Add Watchlist, saved query, new query and immutable universe snapshot sources. *(Watchlists, new queries, and immutable snapshots implemented; saved-query source remains pending.)*
+- [x] Add Universe Sets: select multiple Watchlists and/or screener snapshots in one run.
 - [x] Deduplicate identical source-qualified symbols for execution while retaining every universe-membership label in reports.
 - [ ] Save historical universe membership with its as-of date.
 - [ ] Add versioned strategy definitions with Context, Setup, Entry, Invalidation, Stop, Exit and Costs blocks.
