@@ -495,10 +495,14 @@ impl ResearchTab {
                 }
                 ui.separator();
                 ui.label("New Local NSE screener snapshot");
-                ui.text_edit_singleline(&mut self.saved.screener_snapshot_name)
-                    .hint_text("Snapshot name");
-                ui.text_edit_multiline(&mut self.saved.screener_query)
-                    .hint_text("close > ema(20) AND rsi(14) > 50");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.saved.screener_snapshot_name)
+                        .hint_text("Snapshot name"),
+                );
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.saved.screener_query)
+                        .hint_text("close > ema(20) AND rsi(14) > 50"),
+                );
                 if ui.button("Save query").clicked() {
                     let name = self.saved.screener_snapshot_name.trim().to_owned();
                     if name.is_empty() {
@@ -908,9 +912,11 @@ impl ResearchTab {
                             }
                         }
                     }
-                    None => ui.label(
-                        "Create or select a Paper Trading account before starting a campaign.",
-                    ),
+                    None => {
+                        ui.label(
+                            "Create or select a Paper Trading account before starting a campaign.",
+                        );
+                    }
                 }
                 for index in 0..self.saved.campaigns.len() {
                     let campaign = &self.saved.campaigns[index];
