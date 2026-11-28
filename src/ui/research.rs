@@ -8,8 +8,8 @@ use crate::model::paper::{
 };
 use crate::model::research::{
     CampaignStatus, ExecutionModel, FrozenUniverse, HistoricalConfig, HistoricalTrade,
-    PaperCampaign, StageDefinition, StrategyVersion, UniverseMember,
-    close_above_previous_high_entries, merge_universes, simulate_long,
+    PaperCampaign, StageDefinition, StrategyRule, StrategyVersion, UniverseMember,
+    close_above_previous_high_entries, merge_universes, reb_breakout2_entries, simulate_long,
 };
 use crate::model::{DataSource, Timeframe};
 use crate::service::{
@@ -68,6 +68,8 @@ struct SavedResearch {
     strategy_summary: String,
     #[serde(default)]
     strategy_versions: Vec<StrategyVersion>,
+    #[serde(default)]
+    strategy_rule: StrategyRule,
     context_signal: String,
     context_trigger: String,
     context_confirmation: String,
@@ -334,6 +336,7 @@ fn run_local(
     start_ms: Option<i64>,
     end_ms: Option<i64>,
     config: HistoricalConfig,
+    rule: StrategyRule,
     strategy_version_id: String,
     universe_as_of_ms: i64,
 ) -> RunReport {
@@ -372,7 +375,12 @@ fn run_local(
                     continue;
                 }
                 report.scanned += 1;
-                let entries = close_above_previous_high_entries(&candles);
+                let entries = match rule {
+                    StrategyRule::PreviousHighClose => close_above_previous_high_entries(&candles),
+                    StrategyRule::RebBreakout2 => {
+                        reb_breakout2_entries(&candles, config.max_holding_bars)
+                    }
+                };
                 report
                     .trades
                     .extend(
@@ -587,6 +595,23 @@ impl ResearchTab {
                 ui.text_edit_singleline(&mut self.saved.strategy_name);
                 ui.label("Plain-language summary");
                 ui.text_edit_multiline(&mut self.saved.strategy_summary);
+                egui::ComboBox::from_id_salt("research-strategy-rule")
+                    .selected_text(match self.saved.strategy_rule {
+                        StrategyRule::PreviousHighClose => "Close above previous high",
+                        StrategyRule::RebBreakout2 => "REB / Breakout #2",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.saved.strategy_rule,
+                            StrategyRule::PreviousHighClose,
+                            "Close above previous high",
+                        );
+                        ui.selectable_value(
+                            &mut self.saved.strategy_rule,
+                            StrategyRule::RebBreakout2,
+                            "REB / Breakout #2",
+                        );
+                    });
                 for (name, value) in [
                     ("Context signal", &mut self.saved.context_signal),
                     ("Context trigger", &mut self.saved.context_trigger),
@@ -644,6 +669,7 @@ impl ResearchTab {
                             commission_pct: self.saved.commission_pct,
                             slippage_pct: self.saved.slippage_pct,
                             execution,
+                            rule: self.saved.strategy_rule,
                         });
                         self.notice = Some("Saved immutable strategy version locally.".into());
                     }
@@ -778,6 +804,12 @@ impl ResearchTab {
                             .last()
                             .map(|version| version.id.clone())
                             .unwrap_or_else(|| "unsaved-builder".into());
+                        let rule = self
+                            .saved
+                            .strategy_versions
+                            .last()
+                            .map(|version| version.rule)
+                            .unwrap_or(self.saved.strategy_rule);
                         let universe_as_of_ms = end.unwrap_or_else(now_ms);
                         self.report = None;
                         self.run = Some(work_queue::RESEARCH.start(Some(ui.ctx()), move || {
@@ -786,6 +818,7 @@ impl ResearchTab {
                                 start,
                                 end,
                                 config,
+                                rule,
                                 strategy_version_id,
                                 universe_as_of_ms,
                             )

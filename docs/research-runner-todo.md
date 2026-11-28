@@ -18,7 +18,7 @@ Status: `[x]` verified implemented, `[-]` partially implemented, `[ ]` not imple
 - [x] Give Context, Setup and Entry separate Signal, Trigger and Confirmation conditions.
 - [ ] Persist the signal, trigger, confirmation and execution timestamps, values and failure reasons for every trade lifecycle.
 - [x] Enforce stage order: no trigger without its signal, no confirmation without its trigger, and no entry fill before entry confirmation.
-- [ ] Implement the REB / Breakout #2 strategy definition with a maximum setup age and opposite-side invalidation.
+- [x] Implement the REB / Breakout #2 strategy definition with a maximum setup age and opposite-side invalidation.
 - [x] Build daily historical runner with strict as-of-bar data access and frozen universe membership.
 - [ ] Record pivot occurrence date separately from pivot confirmation date.
 - [x] Implement close and next-bar-open execution models.

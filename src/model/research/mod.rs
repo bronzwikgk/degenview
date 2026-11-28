@@ -80,6 +80,8 @@ pub struct StrategyVersion {
     pub commission_pct: f64,
     pub slippage_pct: f64,
     pub execution: ExecutionModel,
+    #[serde(default)]
+    pub rule: StrategyRule,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -229,6 +231,15 @@ pub enum ExecutionModel {
     NextBarOpen,
 }
 
+/// The executable rule attached to an immutable strategy definition. Text fields remain its
+/// human-readable contract; this value makes the evaluated rule explicit.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum StrategyRule {
+    #[default]
+    PreviousHighClose,
+    RebBreakout2,
+}
+
 /// Returns the fill price available to a historical test without reading any future candle.
 pub fn historical_fill(
     model: ExecutionModel,
@@ -347,6 +358,60 @@ pub fn close_above_previous_high_entries(candles: &[Kline]) -> Vec<bool> {
         .collect()
 }
 
+/// Detects the existing green Range Expansion Bar (REB) study without future-bar access.
+/// A REB is a green, no-gap candle whose range is at least the 90th percentile of its completed
+/// 100-bar range-percent window and whose body midpoint sits within 3.8% of the candle midpoint.
+/// The first full upside breakout (`low > REB high`) creates a setup; the second creates entry.
+/// A close below the REB low invalidates it and the setup expires after `max_setup_age` bars.
+pub fn reb_breakout2_entries(candles: &[Kline], max_setup_age: usize) -> Vec<bool> {
+    let mut entries = vec![false; candles.len()];
+    let mut anchor: Option<(usize, f64, f64, bool)> = None;
+    for index in 0..candles.len() {
+        let bar = &candles[index];
+        if let Some((anchor_index, high, low, first_breakout)) = anchor {
+            if index.saturating_sub(anchor_index) > max_setup_age || bar.close < low {
+                anchor = None;
+            } else if bar.low > high {
+                if first_breakout {
+                    entries[index] = true;
+                    anchor = None;
+                } else {
+                    anchor = Some((anchor_index, high, low, true));
+                }
+            }
+        }
+        if anchor.is_none() && is_green_reb(candles, index) {
+            anchor = Some((index, bar.high, bar.low, false));
+        }
+    }
+    entries
+}
+
+fn is_green_reb(candles: &[Kline], index: usize) -> bool {
+    const LOOKBACK: usize = 100;
+    if index + 1 < LOOKBACK || index == 0 {
+        return false;
+    }
+    let bar = &candles[index];
+    let range = (bar.high - bar.low).max(0.001);
+    let mut ranges: Vec<f64> = candles[index + 1 - LOOKBACK..=index]
+        .iter()
+        .map(|candle| (candle.high - candle.low).max(0.001) / candle.close.max(0.001) * 100.0)
+        .collect();
+    ranges.sort_by(f64::total_cmp);
+    let p90 = ranges[(LOOKBACK - 1) * 9 / 10];
+    let range_pct = range / bar.close.max(0.001) * 100.0;
+    let body_mid = (bar.open + bar.close) / 2.0;
+    let candle_mid = (bar.high + bar.low) / 2.0;
+    let centered = ((body_mid - candle_mid).abs() / range * 100.0) <= 3.8;
+    let previous = &candles[index - 1];
+    range_pct >= p90
+        && bar.open >= previous.low
+        && bar.open <= previous.high
+        && centered
+        && bar.close > bar.open
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,6 +451,61 @@ mod tests {
         assert_eq!(campaign.universe.as_of_ms, 123);
         assert_eq!(campaign.universe.members[0].symbol, "IDEA");
         assert_eq!(campaign.universe.members[0].universe_labels, ["Breakouts"]);
+    }
+
+    #[test]
+    fn reb_breakout_two_enters_only_on_second_full_breakout() {
+        let mut candles: Vec<Kline> = (0..99)
+            .map(|index| Kline {
+                open_time: index,
+                close_time: index,
+                open: 100.0,
+                high: 101.0,
+                low: 99.0,
+                close: 100.0,
+                volume: 1.0,
+            })
+            .collect();
+        // Previous bar keeps the REB anchor's open inside its range.
+        candles.push(Kline {
+            open_time: 99,
+            close_time: 99,
+            open: 100.0,
+            high: 110.0,
+            low: 90.0,
+            close: 100.0,
+            volume: 1.0,
+        });
+        candles.push(Kline {
+            open_time: 100,
+            close_time: 100,
+            open: 98.0,
+            high: 115.0,
+            low: 95.0,
+            close: 112.0,
+            volume: 1.0,
+        });
+        candles.push(Kline {
+            open_time: 101,
+            close_time: 101,
+            open: 116.0,
+            high: 119.0,
+            low: 116.0,
+            close: 118.0,
+            volume: 1.0,
+        });
+        candles.push(Kline {
+            open_time: 102,
+            close_time: 102,
+            open: 117.0,
+            high: 120.0,
+            low: 116.0,
+            close: 119.0,
+            volume: 1.0,
+        });
+        let entries = reb_breakout2_entries(&candles, 10);
+        assert!(!entries[101]);
+        assert!(entries[102]);
     }
     #[test]
     fn stages_cannot_skip_confirmation_order() {
