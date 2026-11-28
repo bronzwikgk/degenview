@@ -114,8 +114,9 @@ impl ChartWorkspace {
                 ToolbarAction::ToggleWatchlist => {
                     self.watchlist_pane.toggle();
                 }
-                ToolbarAction::OpenScreener => self.watchlist_pane.open_screener(),
-                ToolbarAction::ToggleProjects => self.projects_pane.toggle(),
+                // These legacy toolbar actions are intentionally hidden; their full-tab routes
+                // are provided by the New Tab launcher instead.
+                ToolbarAction::OpenScreener | ToolbarAction::ToggleProjects => {}
                 ToolbarAction::ToggleMarketFlow => self.market_flow.toggle(),
                 ToolbarAction::OpenPortfolio => actions.push(WorkspaceAction::OpenPortfolio),
                 ToolbarAction::OpenPineStudio => {
