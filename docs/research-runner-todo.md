@@ -25,7 +25,7 @@ Status: `[x]` verified implemented, `[-]` partially implemented, `[ ]` not imple
 - [ ] Define same-bar stop/target precedence and report ambiguous cases.
 - [ ] Add candidate lifecycle: Candidate, Cancelled, Expired, Entered, Target, Stopped, Timed Out and Open.
 - [ ] Store auditable historical run results and diagnostics; do not suppress data/rule errors.
-- [ ] Add report views: Summary, Equity Curve, Trades, Signals, Symbols, Parameters and Diagnostics.
+- [-] Add report views: Summary, Equity Curve, Trades, Signals, Symbols, Parameters and Diagnostics. *(Summary, trades, per-universe totals, win/loss, and drawdown are implemented; dedicated remaining views pending.)*
 - [x] Show separate reports per source universe and a clearly labelled combined report for a Universe Set.
 - [-] Add forward-only Paper Campaigns from frozen Watchlist/screener snapshots. *(Frozen Watchlist campaigns implemented; evaluation/order hand-off pending.)*
 - [ ] Reuse the existing paper engine for forward orders, brackets, commissions, slippage and ledger records.
