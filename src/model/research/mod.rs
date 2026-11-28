@@ -242,6 +242,29 @@ pub enum StrategyRule {
     RebBreakout2,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum RuleEventKind {
+    ContextConfirmed,
+    SetupConfirmed,
+    EntryConfirmed,
+    Invalidated,
+    Expired,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RuleEvent {
+    pub bar_index: usize,
+    pub bar_time: i64,
+    pub kind: RuleEventKind,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct RuleEvaluation {
+    pub entries: Vec<bool>,
+    pub events: Vec<RuleEvent>,
+}
+
 const fn default_reb_setup_max_age() -> usize {
     20
 }
@@ -370,27 +393,67 @@ pub fn close_above_previous_high_entries(candles: &[Kline]) -> Vec<bool> {
 /// The first full upside breakout (`low > REB high`) creates a setup; the second creates entry.
 /// A close below the REB low invalidates it and the setup expires after `max_setup_age` bars.
 pub fn reb_breakout2_entries(candles: &[Kline], max_setup_age: usize) -> Vec<bool> {
-    let mut entries = vec![false; candles.len()];
+    reb_breakout2_evaluation(candles, max_setup_age).entries
+}
+
+/// The same REB rule with lifecycle events retained for an auditable report.
+pub fn reb_breakout2_evaluation(candles: &[Kline], max_setup_age: usize) -> RuleEvaluation {
+    let mut evaluation = RuleEvaluation {
+        entries: vec![false; candles.len()],
+        events: Vec::new(),
+    };
     let mut anchor: Option<(usize, f64, f64, bool)> = None;
     for index in 0..candles.len() {
         let bar = &candles[index];
         if let Some((anchor_index, high, low, first_breakout)) = anchor {
-            if index.saturating_sub(anchor_index) > max_setup_age || bar.close < low {
+            if index.saturating_sub(anchor_index) > max_setup_age {
+                evaluation.events.push(RuleEvent {
+                    bar_index: index,
+                    bar_time: bar.close_time,
+                    kind: RuleEventKind::Expired,
+                    reason: format!("REB setup exceeded {max_setup_age} bars"),
+                });
+                anchor = None;
+            } else if bar.close < low {
+                evaluation.events.push(RuleEvent {
+                    bar_index: index,
+                    bar_time: bar.close_time,
+                    kind: RuleEventKind::Invalidated,
+                    reason: "Close below REB low before entry".into(),
+                });
                 anchor = None;
             } else if bar.low > high {
                 if first_breakout {
-                    entries[index] = true;
+                    evaluation.entries[index] = true;
+                    evaluation.events.push(RuleEvent {
+                        bar_index: index,
+                        bar_time: bar.close_time,
+                        kind: RuleEventKind::EntryConfirmed,
+                        reason: "Second full-range breakout above REB high".into(),
+                    });
                     anchor = None;
                 } else {
+                    evaluation.events.push(RuleEvent {
+                        bar_index: index,
+                        bar_time: bar.close_time,
+                        kind: RuleEventKind::SetupConfirmed,
+                        reason: "First full-range breakout above REB high".into(),
+                    });
                     anchor = Some((anchor_index, high, low, true));
                 }
             }
         }
         if anchor.is_none() && is_green_reb(candles, index) {
             anchor = Some((index, bar.high, bar.low, false));
+            evaluation.events.push(RuleEvent {
+                bar_index: index,
+                bar_time: bar.close_time,
+                kind: RuleEventKind::ContextConfirmed,
+                reason: "Green P90 no-gap centered REB registered".into(),
+            });
         }
     }
-    entries
+    evaluation
 }
 
 fn is_green_reb(candles: &[Kline], index: usize) -> bool {

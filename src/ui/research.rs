@@ -8,8 +8,8 @@ use crate::model::paper::{
 };
 use crate::model::research::{
     CampaignStatus, ExecutionModel, FrozenUniverse, HistoricalConfig, HistoricalTrade,
-    PaperCampaign, StageDefinition, StrategyRule, StrategyVersion, UniverseMember,
-    close_above_previous_high_entries, merge_universes, reb_breakout2_entries, simulate_long,
+    PaperCampaign, RuleEvent, StageDefinition, StrategyRule, StrategyVersion, UniverseMember,
+    close_above_previous_high_entries, merge_universes, reb_breakout2_evaluation, simulate_long,
 };
 use crate::model::{DataSource, Timeframe};
 use crate::service::{
@@ -262,6 +262,8 @@ struct RunReport {
     skipped: usize,
     trades: Vec<ResearchTrade>,
     #[serde(default)]
+    signals: Vec<ResearchSignal>,
+    #[serde(default)]
     diagnostics: Vec<SymbolDiagnostic>,
 }
 #[derive(Clone, Deserialize, Serialize)]
@@ -274,6 +276,12 @@ struct ResearchTrade {
     symbol: String,
     universe_labels: Vec<String>,
     trade: HistoricalTrade,
+}
+#[derive(Clone, Deserialize, Serialize)]
+struct ResearchSignal {
+    symbol: String,
+    universe_labels: Vec<String>,
+    event: RuleEvent,
 }
 impl RunReport {
     fn net_return(&self) -> f64 {
@@ -381,12 +389,20 @@ fn run_local(
                     continue;
                 }
                 report.scanned += 1;
-                let entries = match rule {
-                    StrategyRule::PreviousHighClose => close_above_previous_high_entries(&candles),
+                let (entries, events) = match rule {
+                    StrategyRule::PreviousHighClose => {
+                        (close_above_previous_high_entries(&candles), Vec::new())
+                    }
                     StrategyRule::RebBreakout2 => {
-                        reb_breakout2_entries(&candles, reb_setup_max_age)
+                        let evaluation = reb_breakout2_evaluation(&candles, reb_setup_max_age);
+                        (evaluation.entries, evaluation.events)
                     }
                 };
+                report.signals.extend(events.into_iter().map(|event| ResearchSignal {
+                    symbol: member.symbol.clone(),
+                    universe_labels: member.universe_labels.clone(),
+                    event,
+                }));
                 report
                     .trades
                     .extend(
@@ -894,6 +910,25 @@ impl ResearchTab {
                         report.exits(crate::model::research::ExitReason::Time),
                         report.exits(crate::model::research::ExitReason::EndOfData)
                     ));
+                    if !report.signals.is_empty() {
+                        let mut context = 0;
+                        let mut setup = 0;
+                        let mut entry = 0;
+                        let mut invalidated = 0;
+                        let mut expired = 0;
+                        for signal in &report.signals {
+                            match signal.event.kind {
+                                crate::model::research::RuleEventKind::ContextConfirmed => context += 1,
+                                crate::model::research::RuleEventKind::SetupConfirmed => setup += 1,
+                                crate::model::research::RuleEventKind::EntryConfirmed => entry += 1,
+                                crate::model::research::RuleEventKind::Invalidated => invalidated += 1,
+                                crate::model::research::RuleEventKind::Expired => expired += 1,
+                            }
+                        }
+                        ui.label(format!(
+                            "REB lifecycle: Context {context} · Setup {setup} · Entry {entry} · Invalidated {invalidated} · Expired {expired}"
+                        ));
+                    }
                     if report.by_universe().len() > 1 {
                         ui.separator();
                         ui.strong("Per source universe");
@@ -910,6 +945,19 @@ impl ResearchTab {
                                 row.trade.reason,
                                 row.universe_labels.join(", ")
                             ));
+                        }
+                        if !report.signals.is_empty() {
+                            ui.separator();
+                            ui.strong("Strategy lifecycle events");
+                            for signal in &report.signals {
+                                ui.label(format!(
+                                    "{} · {:?} · {} · {}",
+                                    signal.symbol,
+                                    signal.event.kind,
+                                    signal.event.bar_time,
+                                    signal.event.reason
+                                ));
+                            }
                         }
                         if !report.diagnostics.is_empty() {
                             ui.separator();
