@@ -120,3 +120,12 @@ All changes made by AI agents will be recorded here with timestamps, reasons, an
   - `src/model/research/mod.rs`
   - `src/ui/research.rs`
   - `docs/research-runner-todo.md`
+
+## Entry 14 - Executable REB Research and Report Views
+- **Timestamp**: 2026-11-28 17:10
+- **Change**: Added the selectable REB / Breakout #2 historical rule, independent setup-expiry control, auditable REB lifecycle events, and separate Summary, Equity Curve, Trades, Signals, Symbols, Parameters, and Diagnostics report views.
+- **Why**: Saved strategy definitions must drive a reproducible historical rule and make its decisions inspectable per symbol.
+- **Location**:
+  - `src/model/research/mod.rs`
+  - `src/ui/research.rs`
+  - `docs/research-runner-todo.md`
