@@ -923,6 +923,15 @@ impl ResearchTab {
                             }
                         }
                     }
+                    if campaign.status == CampaignStatus::Active
+                        && ui
+                            .button(format!("Stop campaign: {}", campaign.id))
+                            .clicked()
+                    {
+                        self.saved.campaigns[index].status = CampaignStatus::Stopped;
+                        self.notice =
+                            Some("Paper campaign stopped; its frozen history is retained.".into());
+                    }
                 }
             }
         };
