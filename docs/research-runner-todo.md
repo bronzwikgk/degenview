@@ -27,8 +27,8 @@ Status: `[x]` verified implemented, `[-]` partially implemented, `[ ]` not imple
 - [-] Store auditable historical run results and diagnostics; do not suppress data/rule errors. *(Persisted runs, symbol diagnostics and REB lifecycle events are implemented; values/fill audit remains pending.)*
 - [-] Add report views: Summary, Equity Curve, Trades, Signals, Symbols, Parameters and Diagnostics. *(Summary, trades, per-universe totals, win/loss, and drawdown are implemented; dedicated remaining views pending.)*
 - [x] Show separate reports per source universe and a clearly labelled combined report for a Universe Set.
-- [-] Add forward-only Paper Campaigns from frozen Watchlist/screener snapshots. *(Frozen campaigns can be manually evaluated; automatic daily scheduling remains pending.)*
-- [-] Reuse the existing paper engine for forward orders, brackets, commissions, slippage and ledger records. *(Manual campaign evaluation submits deduplicated auditable Paper Host market orders with saved stop/target brackets; scheduling and campaign-level cost configuration remain pending.)*
+- [-] Add forward-only Paper Campaigns from frozen Watchlist/screener snapshots. *(Frozen campaigns preserve activation time and strategy rule; they can be manually evaluated only on post-activation bars. Automatic daily scheduling remains pending.)*
+- [-] Reuse the existing paper engine for forward orders, brackets, commissions, slippage and ledger records. *(Manual evaluation submits deduplicated Paper Host market orders with frozen rule settings and stop/target brackets; scheduling and campaign-level cost configuration remain pending.)*
 - [x] Verify the historical runner never sends replay or live quotes to the historical fill model.
 - [-] Test the same strategy on two overlapping universe snapshots and verify independent ledgers, labels and combined totals. *(Deduplication/labels are tested; independent per-universe ledgers remain pending.)*
 

@@ -222,12 +222,26 @@ fn evaluate_campaign(campaign: &mut PaperCampaign, paper: &mut PaperHost) -> Res
         if member.source != "Local" {
             continue;
         }
-        let bars = fetch_klines(DataSource::Local, &member.symbol, Timeframe::DAY_1, 2)
+        let bars = fetch_klines(DataSource::Local, &member.symbol, Timeframe::DAY_1, 1500)
             .map_err(|error| error.to_string())?;
-        if bars.len() < 2 || bars[bars.len() - 1].close <= bars[bars.len() - 2].high {
+        if bars.len() < 2 {
             continue;
         }
         let last = bars.last().expect("checked");
+        if last.close_time <= campaign.activated_at_ms {
+            continue;
+        }
+        let is_entry = match campaign.rule {
+            StrategyRule::PreviousHighClose => last.close > bars[bars.len() - 2].high,
+            StrategyRule::RebBreakout2 => reb_breakout2_evaluation(&bars, campaign.reb_setup_max_age)
+                .entries
+                .last()
+                .copied()
+                .unwrap_or(false),
+        };
+        if !is_entry {
+            continue;
+        }
         let signal_key = format!("{}:{}:{}", member.source, member.symbol, last.close_time);
         if campaign.evaluated_signal_keys.contains(&signal_key) {
             continue;
@@ -1127,7 +1141,7 @@ impl ResearchTab {
                                 self.notice =
                                     Some("Select a Local NSE Watchlist in Universe first.".into());
                             } else {
-                                let (strategy_version, stop_loss_pct, target_pct) = self
+                                let (strategy_version, stop_loss_pct, target_pct, rule, reb_setup_max_age) = self
                                     .saved
                                     .strategy_versions
                                     .last()
@@ -1136,6 +1150,8 @@ impl ResearchTab {
                                             version.id.clone(),
                                             version.stop_loss_pct,
                                             version.target_pct,
+                                            version.rule,
+                                            version.reb_setup_max_age,
                                         )
                                     })
                                     .unwrap_or_else(|| {
@@ -1143,6 +1159,8 @@ impl ResearchTab {
                                             "unsaved-strategy".into(),
                                             self.saved.stop_loss_pct,
                                             self.saved.target_pct,
+                                            self.saved.strategy_rule,
+                                            self.saved.reb_setup_max_age,
                                         )
                                     });
                                 self.saved.campaigns.push(PaperCampaign {
@@ -1150,11 +1168,14 @@ impl ResearchTab {
                                     strategy_version,
                                     account_id,
                                     universe,
+                                    activated_at_ms: as_of_ms,
                                     status: CampaignStatus::Active,
                                     submitted_order_ids: Vec::new(),
                                     evaluated_signal_keys: Vec::new(),
                                     stop_loss_pct,
                                     target_pct,
+                                    rule,
+                                    reb_setup_max_age,
                                 });
                                 self.notice =
                                     Some("Frozen paper campaign created and will be saved.".into());

@@ -48,6 +48,9 @@ pub struct PaperCampaign {
     pub strategy_version: String,
     pub account_id: u64,
     pub universe: FrozenUniverse,
+    /// Campaigns may only submit signals from bars closing after this timestamp.
+    #[serde(default)]
+    pub activated_at_ms: i64,
     pub status: CampaignStatus,
     #[serde(default)]
     pub submitted_order_ids: Vec<u64>,
@@ -60,6 +63,10 @@ pub struct PaperCampaign {
     pub stop_loss_pct: f64,
     #[serde(default)]
     pub target_pct: f64,
+    #[serde(default)]
+    pub rule: StrategyRule,
+    #[serde(default = "default_reb_setup_max_age")]
+    pub reb_setup_max_age: usize,
 }
 
 /// Immutable strategy configuration captured by every run and campaign.
@@ -513,11 +520,14 @@ mod tests {
             strategy_version: "REB v1".into(),
             account_id: 9,
             universe: frozen.clone(),
+            activated_at_ms: 123,
             status: CampaignStatus::Active,
             submitted_order_ids: Vec::new(),
             evaluated_signal_keys: Vec::new(),
             stop_loss_pct: 5.0,
             target_pct: 13.0,
+            rule: StrategyRule::RebBreakout2,
+            reb_setup_max_age: 20,
         };
         assert_eq!(campaign.universe.as_of_ms, 123);
         assert_eq!(campaign.universe.members[0].symbol, "IDEA");
