@@ -2,6 +2,10 @@
 
 use crate::host::paper::PaperHost;
 use crate::lock::lock;
+use crate::model::paper::{
+    PaperInstrument, PaperOrderRequest, PaperOrderSide, PaperOrderType, PaperQuote,
+    PaperTimeInForce,
+};
 use crate::model::research::{
     CampaignStatus, ExecutionModel, FrozenUniverse, HistoricalConfig, HistoricalTrade,
     PaperCampaign, StageDefinition, StrategyVersion, UniverseMember,
@@ -164,6 +168,61 @@ fn scan_screener_snapshot(query: String, name: String) -> Result<SavedSnapshot, 
             members,
         },
     })
+}
+fn evaluate_campaign(campaign: &mut PaperCampaign, paper: &mut PaperHost) -> Result<usize, String> {
+    if campaign.status != CampaignStatus::Active {
+        return Ok(0);
+    }
+    let mut submitted = 0;
+    for member in &campaign.universe.members {
+        if member.source != "Local" {
+            continue;
+        }
+        let bars = fetch_klines(DataSource::Local, &member.symbol, Timeframe::DAY_1, 2)
+            .map_err(|error| error.to_string())?;
+        if bars.len() < 2 || bars[bars.len() - 1].close <= bars[bars.len() - 2].high {
+            continue;
+        }
+        let last = bars.last().expect("checked");
+        let instrument = PaperInstrument::chart(&member.symbol, &member.symbol, DataSource::Local);
+        paper
+            .process_quote(PaperQuote {
+                instrument_key: instrument.key.clone(),
+                bid: Some(last.close),
+                ask: Some(last.close),
+                last: Some(last.close),
+                timestamp: last.close_time,
+                is_market_open: true,
+            })
+            .map_err(|error| error.to_string())?;
+        let order_id = paper
+            .submit(PaperOrderRequest {
+                account_id: campaign.account_id,
+                instrument: instrument.clone(),
+                side: PaperOrderSide::Buy,
+                kind: PaperOrderType::Market,
+                quantity: 1.0,
+                limit_price: None,
+                stop_price: None,
+                time_in_force: PaperTimeInForce::GoodTilCanceled,
+                take_profit: None,
+                stop_loss: None,
+            })
+            .map_err(|error| error.to_string())?;
+        paper
+            .process_quote(PaperQuote {
+                instrument_key: instrument.key,
+                bid: Some(last.close),
+                ask: Some(last.close),
+                last: Some(last.close),
+                timestamp: last.close_time,
+                is_market_open: true,
+            })
+            .map_err(|error| error.to_string())?;
+        campaign.submitted_order_ids.push(order_id);
+        submitted += 1;
+    }
+    Ok(submitted)
 }
 #[derive(Clone, Default, Deserialize, Serialize)]
 struct RunReport {
@@ -840,7 +899,8 @@ impl ResearchTab {
                         "Create or select a Paper Trading account before starting a campaign.",
                     ),
                 }
-                for campaign in &self.saved.campaigns {
+                for index in 0..self.saved.campaigns.len() {
+                    let campaign = &self.saved.campaigns[index];
                     ui.label(format!(
                         "{} · {:?} · {} members · account {}",
                         campaign.strategy_version,
@@ -848,6 +908,21 @@ impl ResearchTab {
                         campaign.universe.members.len(),
                         campaign.account_id
                     ));
+                    if ui
+                        .button(format!("Evaluate campaign now: {}", campaign.id))
+                        .clicked()
+                    {
+                        let campaign = &mut self.saved.campaigns[index];
+                        match evaluate_campaign(campaign, &mut lock(paper)) {
+                            Ok(submitted) => {
+                                self.notice =
+                                    Some(format!("Submitted {submitted} forward paper orders."))
+                            }
+                            Err(error) => {
+                                self.notice = Some(format!("Campaign evaluation failed: {error}"))
+                            }
+                        }
+                    }
                 }
             }
         };
