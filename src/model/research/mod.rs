@@ -405,6 +405,7 @@ pub fn reb_breakout2_evaluation(candles: &[Kline], max_setup_age: usize) -> Rule
     let mut anchor: Option<(usize, f64, f64, bool)> = None;
     for index in 0..candles.len() {
         let bar = &candles[index];
+        let mut entered_this_bar = false;
         if let Some((anchor_index, high, low, first_breakout)) = anchor {
             if index.saturating_sub(anchor_index) > max_setup_age {
                 evaluation.events.push(RuleEvent {
@@ -425,6 +426,7 @@ pub fn reb_breakout2_evaluation(candles: &[Kline], max_setup_age: usize) -> Rule
             } else if bar.low > high {
                 if first_breakout {
                     evaluation.entries[index] = true;
+                    entered_this_bar = true;
                     evaluation.events.push(RuleEvent {
                         bar_index: index,
                         bar_time: bar.close_time,
@@ -443,7 +445,7 @@ pub fn reb_breakout2_evaluation(candles: &[Kline], max_setup_age: usize) -> Rule
                 }
             }
         }
-        if anchor.is_none() && is_green_reb(candles, index) {
+        if !entered_this_bar && anchor.is_none() && is_green_reb(candles, index) {
             anchor = Some((index, bar.high, bar.low, false));
             evaluation.events.push(RuleEvent {
                 bar_index: index,
@@ -572,9 +574,21 @@ mod tests {
             close: 119.0,
             volume: 1.0,
         });
-        let entries = reb_breakout2_entries(&candles, 10);
-        assert!(!entries[101]);
-        assert!(entries[102]);
+        let evaluation = reb_breakout2_evaluation(&candles, 10);
+        assert!(!evaluation.entries[101]);
+        assert!(evaluation.entries[102]);
+        assert_eq!(
+            evaluation
+                .events
+                .iter()
+                .map(|event| event.kind)
+                .collect::<Vec<_>>(),
+            vec![
+                RuleEventKind::ContextConfirmed,
+                RuleEventKind::SetupConfirmed,
+                RuleEventKind::EntryConfirmed,
+            ]
+        );
     }
     #[test]
     fn stages_cannot_skip_confirmation_order() {
