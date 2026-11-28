@@ -167,6 +167,8 @@ fn scan_screener_snapshot(query: String, name: String) -> Result<SavedSnapshot, 
 }
 #[derive(Clone, Default, Deserialize, Serialize)]
 struct RunReport {
+    #[serde(default)]
+    strategy_version_id: String,
     scanned: usize,
     skipped: usize,
     trades: Vec<ResearchTrade>,
@@ -204,8 +206,12 @@ fn run_local(
     start_ms: Option<i64>,
     end_ms: Option<i64>,
     config: HistoricalConfig,
+    strategy_version_id: String,
 ) -> RunReport {
-    let mut report = RunReport::default();
+    let mut report = RunReport {
+        strategy_version_id,
+        ..Default::default()
+    };
     for member in members {
         if member.source != "Local" {
             report.skipped += 1;
@@ -608,9 +614,15 @@ impl ResearchTab {
                             commission_pct: self.saved.commission_pct,
                             slippage_pct: self.saved.slippage_pct,
                         };
+                        let strategy_version_id = self
+                            .saved
+                            .strategy_versions
+                            .last()
+                            .map(|version| version.id.clone())
+                            .unwrap_or_else(|| "unsaved-builder".into());
                         self.report = None;
                         self.run = Some(work_queue::RESEARCH.start(Some(ui.ctx()), move || {
-                            run_local(members, start, end, config)
+                            run_local(members, start, end, config, strategy_version_id)
                         }));
                     }
                 }
@@ -631,6 +643,7 @@ impl ResearchTab {
                         "{} symbols scanned · {} skipped · {} trades",
                         report.scanned, report.skipped, total
                     ));
+                    ui.label(format!("Strategy version: {}", report.strategy_version_id));
                     ui.label(format!(
                         "Net return (one unit per trade): {:+.2}% · Win rate: {:.1}%",
                         report.net_return(),
