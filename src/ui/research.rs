@@ -189,6 +189,33 @@ impl RunReport {
             .filter(|row| row.trade.net_return_pct > 0.0)
             .count()
     }
+    fn average_win_loss(&self) -> (f64, f64) {
+        let wins: Vec<f64> = self
+            .trades
+            .iter()
+            .filter_map(|row| (row.trade.net_return_pct > 0.0).then_some(row.trade.net_return_pct))
+            .collect();
+        let losses: Vec<f64> = self
+            .trades
+            .iter()
+            .filter_map(|row| (row.trade.net_return_pct <= 0.0).then_some(row.trade.net_return_pct))
+            .collect();
+        (
+            wins.iter().sum::<f64>() / wins.len().max(1) as f64,
+            losses.iter().sum::<f64>() / losses.len().max(1) as f64,
+        )
+    }
+    fn max_drawdown(&self) -> f64 {
+        let mut equity = 0.0_f64;
+        let mut peak = 0.0_f64;
+        let mut drawdown = 0.0_f64;
+        for row in &self.trades {
+            equity += row.trade.net_return_pct;
+            peak = peak.max(equity);
+            drawdown = drawdown.min(equity - peak);
+        }
+        drawdown
+    }
     fn by_universe(&self) -> BTreeMap<&str, (usize, f64)> {
         let mut result = BTreeMap::new();
         for row in &self.trades {
@@ -649,6 +676,8 @@ impl ResearchTab {
                         report.net_return(),
                         win_rate
                     ));
+                    let (average_win, average_loss) = report.average_win_loss();
+                    ui.label(format!("Average win: {average_win:+.2}% · Average loss: {average_loss:+.2}% · Max drawdown: {:.2}%", report.max_drawdown()));
                     if report.by_universe().len() > 1 {
                         ui.separator();
                         ui.strong("Per source universe");
