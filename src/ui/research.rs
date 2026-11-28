@@ -603,8 +603,14 @@ impl ResearchTab {
                 }
                 for saved in self.saved.saved_screener_queries.clone() {
                     if ui.button(format!("Load query: {}", saved.name)).clicked() {
-                        self.saved.screener_snapshot_name = saved.name;
-                        self.saved.screener_query = saved.query;
+                        self.saved.screener_snapshot_name = saved.name.clone();
+                        self.saved.screener_query = saved.query.clone();
+                    }
+                    if ui.small_button("Delete saved query").clicked() {
+                        self.saved
+                            .saved_screener_queries
+                            .retain(|query| query.name != saved.name);
+                        self.notice = Some("Deleted saved query locally.".into());
                     }
                 }
                 if ui
@@ -629,7 +635,7 @@ impl ResearchTab {
                     ui.spinner();
                     ui.label("Scanning Local NSE data...");
                 }
-                for snapshot in &self.saved.screener_snapshots {
+                for snapshot in self.saved.screener_snapshots.clone() {
                     let label = format!("Snapshot: {}", snapshot.name);
                     if ui
                         .button(format!("Add {label} ({})", snapshot.universe.members.len()))
@@ -644,6 +650,19 @@ impl ResearchTab {
                             self.saved.universe_set.push('\n');
                         }
                         self.saved.universe_set.push_str(&label);
+                    }
+                    if ui.small_button(format!("Delete {label}")).clicked() {
+                        self.saved
+                            .screener_snapshots
+                            .retain(|item| item.name != snapshot.name);
+                        self.saved.universe_set = self
+                            .saved
+                            .universe_set
+                            .lines()
+                            .filter(|line| line.trim() != label)
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        self.notice = Some("Deleted frozen screener snapshot locally.".into());
                     }
                 }
             }
