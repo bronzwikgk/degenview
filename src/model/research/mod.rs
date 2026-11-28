@@ -77,6 +77,8 @@ pub struct StrategyVersion {
     pub stop_loss_pct: f64,
     pub target_pct: f64,
     pub max_holding_bars: usize,
+    #[serde(default = "default_reb_setup_max_age")]
+    pub reb_setup_max_age: usize,
     pub commission_pct: f64,
     pub slippage_pct: f64,
     pub execution: ExecutionModel,
@@ -238,6 +240,10 @@ pub enum StrategyRule {
     #[default]
     PreviousHighClose,
     RebBreakout2,
+}
+
+const fn default_reb_setup_max_age() -> usize {
+    20
 }
 
 /// Returns the fill price available to a historical test without reading any future candle.

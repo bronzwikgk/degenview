@@ -92,6 +92,8 @@ struct SavedResearch {
     target_pct: f64,
     #[serde(default = "default_max_holding")]
     max_holding_bars: usize,
+    #[serde(default = "default_reb_setup_max_age")]
+    reb_setup_max_age: usize,
     #[serde(default)]
     commission_pct: f64,
     #[serde(default)]
@@ -119,6 +121,9 @@ const fn default_target() -> f64 {
 }
 const fn default_max_holding() -> usize {
     45
+}
+const fn default_reb_setup_max_age() -> usize {
+    20
 }
 
 /// Converts an ISO calendar day to UTC midnight without relying on the host locale/timezone.
@@ -337,6 +342,7 @@ fn run_local(
     end_ms: Option<i64>,
     config: HistoricalConfig,
     rule: StrategyRule,
+    reb_setup_max_age: usize,
     strategy_version_id: String,
     universe_as_of_ms: i64,
 ) -> RunReport {
@@ -378,7 +384,7 @@ fn run_local(
                 let entries = match rule {
                     StrategyRule::PreviousHighClose => close_above_previous_high_entries(&candles),
                     StrategyRule::RebBreakout2 => {
-                        reb_breakout2_entries(&candles, config.max_holding_bars)
+                        reb_breakout2_entries(&candles, reb_setup_max_age)
                     }
                 };
                 report
@@ -630,6 +636,13 @@ impl ResearchTab {
                 ui.text_edit_singleline(&mut self.saved.invalidation);
                 ui.label("Exit rule");
                 ui.text_edit_singleline(&mut self.saved.exit_rule);
+                if self.saved.strategy_rule == StrategyRule::RebBreakout2 {
+                    ui.add(
+                        egui::DragValue::new(&mut self.saved.reb_setup_max_age)
+                            .range(1..=365)
+                            .suffix(" REB setup bars"),
+                    );
+                }
                 if ui.button("Save immutable strategy version").clicked() {
                     let name = self.saved.strategy_name.trim().to_owned();
                     if name.is_empty() {
@@ -666,6 +679,7 @@ impl ResearchTab {
                             stop_loss_pct: self.saved.stop_loss_pct,
                             target_pct: self.saved.target_pct,
                             max_holding_bars: self.saved.max_holding_bars,
+                            reb_setup_max_age: self.saved.reb_setup_max_age,
                             commission_pct: self.saved.commission_pct,
                             slippage_pct: self.saved.slippage_pct,
                             execution,
@@ -810,6 +824,12 @@ impl ResearchTab {
                             .last()
                             .map(|version| version.rule)
                             .unwrap_or(self.saved.strategy_rule);
+                        let reb_setup_max_age = self
+                            .saved
+                            .strategy_versions
+                            .last()
+                            .map(|version| version.reb_setup_max_age)
+                            .unwrap_or(self.saved.reb_setup_max_age);
                         let universe_as_of_ms = end.unwrap_or_else(now_ms);
                         self.report = None;
                         self.run = Some(work_queue::RESEARCH.start(Some(ui.ctx()), move || {
@@ -819,6 +839,7 @@ impl ResearchTab {
                                 end,
                                 config,
                                 rule,
+                                reb_setup_max_age,
                                 strategy_version_id,
                                 universe_as_of_ms,
                             )
