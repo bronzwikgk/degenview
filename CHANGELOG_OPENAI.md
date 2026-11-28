@@ -129,3 +129,9 @@ All changes made by AI agents will be recorded here with timestamps, reasons, an
   - `src/model/research/mod.rs`
   - `src/ui/research.rs`
   - `docs/research-runner-todo.md`
+
+## Entry 15 - Research Universe Entity Management
+- **Timestamp**: 2026-11-28 17:30
+- **Change**: Added local deletion controls for saved screener queries and frozen screener snapshots; deleting a snapshot also removes it from the active Universe Set.
+- **Why**: Saved query and snapshot sources need a complete local lifecycle so an historical run cannot silently retain a deleted source.
+- **Location**: `src/ui/research.rs`, `docs/research-runner-todo.md`
