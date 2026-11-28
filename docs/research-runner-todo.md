@@ -28,7 +28,7 @@ Status: `[x]` verified implemented, `[-]` partially implemented, `[ ]` not imple
 - [-] Add report views: Summary, Equity Curve, Trades, Signals, Symbols, Parameters and Diagnostics. *(Summary, trades, per-universe totals, win/loss, and drawdown are implemented; dedicated remaining views pending.)*
 - [x] Show separate reports per source universe and a clearly labelled combined report for a Universe Set.
 - [-] Add forward-only Paper Campaigns from frozen Watchlist/screener snapshots. *(Frozen Watchlist campaigns implemented; evaluation/order hand-off pending.)*
-- [ ] Reuse the existing paper engine for forward orders, brackets, commissions, slippage and ledger records.
+- [-] Reuse the existing paper engine for forward orders, brackets, commissions, slippage and ledger records. *(Forward campaign evaluation submits auditable market orders through Paper Host; automatic daily scheduling and bracket rules remain pending.)*
 - [x] Verify the historical runner never sends replay or live quotes to the historical fill model.
 - [-] Test the same strategy on two overlapping universe snapshots and verify independent ledgers, labels and combined totals. *(Deduplication/labels are tested; independent per-universe ledgers remain pending.)*
 
